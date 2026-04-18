@@ -1,7 +1,9 @@
 use adw::prelude::*;
-use adw::{ActionRow, HeaderBar, NavigationPage, Toast, ToastOverlay, ToolbarView};
+use adw::{ActionRow, AlertDialog, HeaderBar, NavigationPage, Toast, ToastOverlay, ToolbarView};
 use gtk4::glib::object::IsA;
-use gtk4::{Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, ScrolledWindow};
+use gtk4::{
+    Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, ScrolledWindow, Window,
+};
 
 use crate::state::AppStateRef;
 use crate::ui;
@@ -111,12 +113,46 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
     actions_row.append(&import_btn);
+
+    let remove_mismatch_btn = Button::builder()
+        .label("Remove mismatched…")
+        .tooltip_text(
+            "Remove packages shown in red — not listed for your saved AUR username as maintainer \
+             or co-maintainer in the last Connection-tab check.",
+        )
+        .css_classes(vec!["pill", "destructive-action"])
+        .build();
+    {
+        let state = state.clone();
+        let list = list.clone();
+        let shell = shell.clone();
+        let toasts = toasts.clone();
+        remove_mismatch_btn.connect_clicked(move |btn| {
+            let ids = mismatch_ids_still_in_registry(&state);
+            if ids.is_empty() {
+                toasts.add_toast(Toast::new(
+                    "No mismatched packages to remove — run “apply” on your username on the AUR \
+                     Connection tab first, or none are registered.",
+                ));
+                return;
+            }
+            let Some(parent) = btn.root().and_downcast::<Window>() else {
+                toasts.add_toast(Toast::new("Could not open confirmation dialog."));
+                return;
+            };
+            open_remove_mismatch_confirm(&parent, ids, &list, &shell, &state, &toasts);
+        });
+    }
+    actions_row.append(&remove_mismatch_btn);
+
     content.append(&actions_row);
 
     let footer = Label::builder()
         .label(
             "Tip: the AUR repo for each package must already exist. First-time \
-             registration is not supported yet.",
+             registration is not supported yet. After you apply your username on the AUR \
+             Connection tab, rows in red are not listed for that login as maintainer or \
+             co-maintainer in the last RPC check.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -136,6 +172,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 /// Rebuild the package list from the current registry. Called on first
 /// render and whenever a package is added or removed.
 pub(crate) fn refresh_package_list(list: &ListBox, shell: &MainShell, state: &AppStateRef) {
+    state.borrow_mut().prune_aur_account_mismatch_ids();
+
     crate::ui::clear_boxed_list(list);
 
     let packages = state.borrow().registry.packages.clone();
@@ -161,13 +199,29 @@ fn render_package_row(
     state: &AppStateRef,
     pkg: &PackageDef,
 ) -> ActionRow {
+    let mismatch = state
+        .borrow()
+        .aur_account_mismatch_ids
+        .as_ref()
+        .is_some_and(|set| set.contains(&pkg.id));
+
     let row = ActionRow::builder()
         .title(&pkg.title)
         .subtitle(&pkg.subtitle)
         .activatable(true)
         .build();
+    if mismatch {
+        row.add_css_class("error");
+        row.set_tooltip_text(Some(
+            "Not listed for your saved AUR username as maintainer or co-maintainer in the last \
+             RPC check. Use AUR Connection → apply on the username field to re-check.",
+        ));
+    }
     let icon = Image::from_icon_name(pkg.icon());
     icon.set_pixel_size(28);
+    if mismatch {
+        icon.add_css_class("error");
+    }
     row.add_prefix(&icon);
 
     let edit_btn = Button::builder()
@@ -245,6 +299,112 @@ fn render_package_row(
     }
 
     row
+}
+
+const DIALOG_ID_LIST_MAX: usize = 12;
+
+fn format_ids_for_confirm_dialog(ids: &[String]) -> String {
+    if ids.is_empty() {
+        return String::new();
+    }
+    if ids.len() <= DIALOG_ID_LIST_MAX {
+        ids.join(", ")
+    } else {
+        format!(
+            "{} … (+{} more)",
+            ids[..DIALOG_ID_LIST_MAX].join(", "),
+            ids.len() - DIALOG_ID_LIST_MAX
+        )
+    }
+}
+
+/// Package ids flagged red that still exist in the registry.
+fn mismatch_ids_still_in_registry(state: &AppStateRef) -> Vec<String> {
+    let st = state.borrow();
+    let Some(ref mism) = st.aur_account_mismatch_ids else {
+        return Vec::new();
+    };
+    if mism.is_empty() {
+        return Vec::new();
+    }
+    let registered: std::collections::HashSet<&str> =
+        st.registry.packages.iter().map(|p| p.id.as_str()).collect();
+    let mut out: Vec<String> = mism
+        .iter()
+        .filter(|id| registered.contains(id.as_str()))
+        .cloned()
+        .collect();
+    out.sort();
+    out
+}
+
+fn perform_remove_mismatched_packages(
+    list: &ListBox,
+    shell: &MainShell,
+    state: &AppStateRef,
+    toasts: &ToastOverlay,
+    ids: &[String],
+) {
+    let n = ids.len();
+    {
+        let mut st = state.borrow_mut();
+        let selected_id = st.package.as_ref().map(|p| p.id.clone());
+        for id in ids {
+            let _ = st.registry.remove(id);
+            if let Some(ref mut m) = st.aur_account_mismatch_ids {
+                m.remove(id);
+            }
+        }
+        if let Some(sid) = selected_id
+            && ids.iter().any(|x| x == &sid)
+        {
+            st.package = None;
+        }
+        if let Some(ref lp) = st.config.last_package
+            && ids.iter().any(|x| x == lp)
+        {
+            st.config.last_package = None;
+        }
+        let _ = st.registry.save();
+        let _ = st.config.save();
+    }
+    shell.refresh_tabs_for_package(state);
+    refresh_package_list(list, shell, state);
+    toasts.add_toast(Toast::new(&format!(
+        "Removed {n} package(s) from the local registry."
+    )));
+}
+
+fn open_remove_mismatch_confirm(
+    parent: &Window,
+    ids: Vec<String>,
+    list: &ListBox,
+    shell: &MainShell,
+    state: &AppStateRef,
+    toasts: &ToastOverlay,
+) {
+    let body = format!(
+        "This removes only local registry entries (not the AUR). Packages: {}",
+        format_ids_for_confirm_dialog(&ids)
+    );
+    let dialog = AlertDialog::new(Some("Remove mismatched packages?"), Some(&body));
+    dialog.add_responses(&[("cancel", "_Cancel"), ("remove", "_Remove")]);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+    let list = list.clone();
+    let shell = shell.clone();
+    let state = state.clone();
+    let toasts = toasts.clone();
+    let ids_cb = ids;
+    dialog.choose(
+        Some(parent),
+        Option::<&gtk4::gio::Cancellable>::None,
+        move |response| {
+            if response.as_str() == "remove" {
+                perform_remove_mismatched_packages(&list, &shell, &state, &toasts, &ids_cb);
+            }
+        },
+    );
 }
 
 pub(crate) fn wrap_page(title: &str, child: &impl IsA<gtk4::Widget>) -> NavigationPage {

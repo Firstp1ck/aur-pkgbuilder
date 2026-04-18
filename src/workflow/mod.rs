@@ -4,6 +4,7 @@ pub mod aur_git;
 pub mod aur_ssh;
 pub mod build;
 pub mod package;
+pub mod pkgbase;
 pub mod pkgbuild_diff;
 pub mod pkgbuild_edit;
 pub mod preflight;

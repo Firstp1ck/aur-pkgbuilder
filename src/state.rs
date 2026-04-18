@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -15,6 +16,10 @@ pub struct AppState {
     pub package: Option<PackageDef>,
     pub pkgbuild_path: Option<PathBuf>,
     pub ssh_ok: bool,
+    /// `PackageDef::id` values not returned as **maintainer or co-maintainer** for
+    /// `config.aur_username` in the last successful AUR RPC check (Connection tab apply).
+    /// `None` means no check has succeeded this session, or the username was cleared.
+    pub aur_account_mismatch_ids: Option<HashSet<String>>,
 }
 
 pub type AppStateRef = Rc<RefCell<AppState>>;
@@ -27,7 +32,25 @@ impl AppState {
             package: None,
             pkgbuild_path: None,
             ssh_ok: false,
+            aur_account_mismatch_ids: None,
         }))
+    }
+
+    /// What: Drop mismatch markers for packages no longer in the registry.
+    ///
+    /// Details:
+    /// - Call after registry edits so stale ids do not keep highlighting.
+    pub fn prune_aur_account_mismatch_ids(&mut self) {
+        let Some(ref mut set) = self.aur_account_mismatch_ids else {
+            return;
+        };
+        let valid: HashSet<String> = self
+            .registry
+            .packages
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        set.retain(|id| valid.contains(id));
     }
 
     /// Convenience: the currently selected package. Every screen downstream

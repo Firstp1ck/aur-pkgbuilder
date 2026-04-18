@@ -11,7 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{NavigationPage, NavigationView, TabBar, TabView};
+use adw::{EntryRow, NavigationPage, NavigationView, TabBar, TabView};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{Align, Box as GtkBox, Button, Label, ListBox, Orientation};
@@ -54,6 +54,8 @@ struct MainShellInner {
     tab_pages: RefCell<Vec<adw::TabPage>>,
     home_tab_page: RefCell<Option<adw::TabPage>>,
     home_list: RefCell<Option<glib::WeakRef<ListBox>>>,
+    /// Weak ref to Connection tab “AUR username” row — kept in sync when username is saved elsewhere.
+    connection_aur_username_row: RefCell<Option<glib::WeakRef<EntryRow>>>,
     /// Last package id used to build Sync–Publish tab bodies; `None` = placeholders.
     tabs_package_id: RefCell<Option<String>>,
     /// `pkgver` read for the Version tab label (best-effort).
@@ -105,6 +107,7 @@ impl MainShell {
             tab_pages: RefCell::new(Vec::new()),
             home_tab_page: RefCell::new(None),
             home_list: RefCell::new(None),
+            connection_aur_username_row: RefCell::new(None),
             tabs_package_id: RefCell::new(None),
             pkgver_tab_cache: RefCell::new(String::new()),
             periodic_connection_source: RefCell::new(None),
@@ -435,7 +438,33 @@ impl MainShell {
         }
     }
 
-    fn refresh_home_list(&self, state: &AppStateRef) {
+    /// Registers the Connection tab AUR username [`EntryRow`] for cross-screen updates.
+    pub fn register_connection_aur_username_row(&self, row: &EntryRow) {
+        *self.inner.connection_aur_username_row.borrow_mut() = Some(row.downgrade());
+    }
+
+    /// Sets Connection tab AUR username field text from [`crate::config::Config::aur_username`].
+    pub fn refresh_connection_aur_username_field(&self, state: &AppStateRef) {
+        let Some(row) = self
+            .inner
+            .connection_aur_username_row
+            .borrow()
+            .as_ref()
+            .and_then(|w| w.upgrade())
+        else {
+            return;
+        };
+        let text = state
+            .borrow()
+            .config
+            .aur_username
+            .clone()
+            .unwrap_or_default();
+        row.set_text(&text);
+    }
+
+    /// Rebuild the Home tab package list (e.g. after registry or AUR username checks change).
+    pub fn refresh_home_list(&self, state: &AppStateRef) {
         let Some(list) = self
             .inner
             .home_list

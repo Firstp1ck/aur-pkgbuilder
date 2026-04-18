@@ -39,8 +39,9 @@ impl PackageKind {
 /// the UI and persisted in [`crate::workflow::registry`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageDef {
-    /// The AUR package name (e.g. `my-pkg-bin`). Also used as the directory
-    /// name inside the working directory.
+    /// AUR **pkgbase** / repository name (e.g. `my-pkg-bin`). For split PKGBUILDs
+    /// this is the shared base, not an individual split `pkgname`. Also used as
+    /// the default directory name under the work dir.
     pub id: String,
     /// Short display name.
     pub title: String,

@@ -2,14 +2,16 @@ use std::path::PathBuf;
 
 use adw::prelude::*;
 use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
-use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
+use gtk4::gio;
+use gtk4::{Align, Box as GtkBox, Button, FileLauncher, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::folder_pick;
 use crate::ui::shell::{MainShell, ProcessTab};
-use crate::workflow::preflight::{self, SshProbe, ToolCheck};
+use crate::workflow::aur_account::{self, ApplyAurUsernameOutcome, AurAccountError};
+use crate::workflow::preflight::{self, PackagingConfigTarget, SshProbe, ToolCheck};
 
 /// Whether we should probe AUR SSH immediately on opening this page: the user
 /// has configured a key in the app, or the conventional `~/.ssh/aur` key exists.
@@ -98,9 +100,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(
-            "Your AUR username identifies you; your SSH key proves you own that \
-             username when you push. Make sure the tools, the key, and the working \
-             directory are all set before the first build.",
+            "Your AUR username identifies you for package lookups; your SSH key proves you \
+             own that account when you push. Edit the username under AUR account below, then \
+             press apply (✓) to save and verify registered packages. Make sure the tools, the \
+             key, and the working directory are ready before the first build.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -109,6 +112,109 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     content.append(&heading);
     content.append(&sub);
+
+    // --- AUR account (username) ---
+    let account_group = PreferencesGroup::builder()
+        .title("AUR account")
+        .description(
+            "Same login as on aur.archlinux.org. Used for “Import from AUR account”, RPC \
+             lookups, and opening your profile when pasting SSH keys. Press the apply (✓) \
+             button to save — the AUR is queried first and registered packages are checked \
+             against your maintainer/co-maintainer list.",
+        )
+        .build();
+    let username_row = EntryRow::builder()
+        .title("AUR username")
+        .show_apply_button(true)
+        .build();
+    if let Some(u) = state.borrow().config.aur_username.as_deref() {
+        username_row.set_text(u);
+    }
+    {
+        let state_apply = state.clone();
+        let toasts_apply = toasts.clone();
+        let shell_apply = shell.clone();
+        username_row.connect_apply(move |row| {
+            let trimmed = row.text().trim().to_string();
+            let pkg_ids: Vec<String> = state_apply
+                .borrow()
+                .registry
+                .packages
+                .iter()
+                .map(|p| p.id.clone())
+                .collect();
+            let registered_len = pkg_ids.len();
+            let row_cb = row.clone();
+            row_cb.set_sensitive(false);
+            let state_cb = state_apply.clone();
+            let toasts_cb = toasts_apply.clone();
+            let shell_cb = shell_apply.clone();
+            runtime::spawn(
+                async move {
+                    aur_account::apply_aur_username_with_registry_check(&trimmed, &pkg_ids).await
+                },
+                move |res: Result<ApplyAurUsernameOutcome, AurAccountError>| {
+                    row_cb.set_sensitive(true);
+                    match res {
+                        Ok(outcome) => {
+                            match &outcome {
+                                ApplyAurUsernameOutcome::Cleared => {
+                                    state_cb.borrow_mut().config.aur_username = None;
+                                    state_cb.borrow_mut().aur_account_mismatch_ids = None;
+                                }
+                                ApplyAurUsernameOutcome::Verified { username, report } => {
+                                    state_cb.borrow_mut().config.aur_username =
+                                        Some(username.clone());
+                                    state_cb.borrow_mut().aur_account_mismatch_ids = Some(
+                                        report.unmatched_registry_ids.iter().cloned().collect(),
+                                    );
+                                }
+                            }
+                            let _ = state_cb.borrow().config.save();
+                            shell_cb.refresh_home_list(&state_cb);
+                            match outcome {
+                                ApplyAurUsernameOutcome::Cleared => {
+                                    row_cb.set_text("");
+                                    let msg = if registered_len == 0 {
+                                        "Username cleared.".to_string()
+                                    } else {
+                                        format!(
+                                            "Username cleared. {registered_len} package(s) remain — save a username again to verify them on the AUR."
+                                        )
+                                    };
+                                    toasts_cb.add_toast(Toast::new(&msg));
+                                }
+                                ApplyAurUsernameOutcome::Verified { username, report } => {
+                                    row_cb.set_text(&username);
+                                    if report.unmatched_registry_ids.is_empty() {
+                                        toasts_cb.add_toast(Toast::new(&format!(
+                                            "Username saved. All {registered_len} registered package(s) appear under this account ({n} from AUR RPC, maintainer or co-maintainer).",
+                                            n = report.aur_package_count
+                                        )));
+                                    } else {
+                                        let list =
+                                            format_unmatched_list(&report.unmatched_registry_ids);
+                                        toasts_cb.add_toast(Toast::new(&format!(
+                                            "Username saved. {k} package(s) are not listed for this account on the AUR (maintainer/co-maintainer RPC): {list}",
+                                            k = report.unmatched_registry_ids.len(),
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            toasts_cb.add_toast(Toast::new(&format!(
+                                "Could not verify username — not saved: {e}"
+                            )));
+                        }
+                    }
+                },
+            );
+        });
+    }
+    shell.register_connection_aur_username_row(&username_row);
+    account_group.add(&username_row);
+    content.append(&account_group);
 
     // --- Tools group ---
     let tools_group = PreferencesGroup::builder()
@@ -119,15 +225,42 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     content.append(&tools_group);
 
+    let recommended_group = PreferencesGroup::builder()
+        .title("Recommended environment")
+        .description(
+            "These are not required to open the app, but they match common maintainer practice: \
+             install the `base-devel` group for toolchain completeness, use `fakeroot` for \
+             local `makepkg --fakeroot` checks, and add `devtools` so you can run clean-chroot \
+             builds (missing host libraries then show up before you push). Typical chroot state \
+             lives under `/var/lib/archbuild` after the first root is created. \
+             https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot",
+        )
+        .build();
+    content.append(&recommended_group);
+
+    content.append(&packaging_config_shortcuts_group(&toasts));
+
     let tools_group_weak = tools_group.downgrade();
-    runtime::spawn(preflight::check_tools(), move |tools| {
-        let Some(group) = tools_group_weak.upgrade() else {
-            return;
-        };
-        for check in tools {
-            group.add(&render_tool_row(&check));
-        }
-    });
+    let recommended_group_weak = recommended_group.downgrade();
+    runtime::spawn(
+        async move {
+            let required = preflight::check_tools().await;
+            let recommended = preflight::check_environment_recommended().await;
+            (required, recommended)
+        },
+        move |(required, recommended)| {
+            if let Some(group) = tools_group_weak.upgrade() {
+                for check in required {
+                    group.add(&render_tool_row(&check));
+                }
+            }
+            if let Some(group) = recommended_group_weak.upgrade() {
+                for check in recommended {
+                    group.add(&render_tool_row(&check));
+                }
+            }
+        },
+    );
 
     // --- Paths group ---
     let paths_group = PreferencesGroup::builder().title("Paths").build();
@@ -259,10 +392,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     probe_group.add(&setup_row);
     {
         let nav = shell.nav();
+        let shell_ssh = shell.clone();
         let state = state.clone();
         setup_btn.connect_clicked(move |_| {
-            let page =
-                ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromConnection);
+            let page = ui::ssh_setup::build(
+                &nav,
+                &shell_ssh,
+                &state,
+                ui::ssh_setup::SshSetupFlavor::FromConnection,
+            );
             nav.push(&page);
         });
     }
@@ -350,21 +488,131 @@ fn save_config(state: &AppStateRef) {
     let _ = cfg.save();
 }
 
+fn format_unmatched_list(ids: &[String]) -> String {
+    const MAX: usize = 8;
+    if ids.len() <= MAX {
+        ids.join(", ")
+    } else {
+        format!("{} … (+{} more)", ids[..MAX].join(", "), ids.len() - MAX)
+    }
+}
+
+fn tool_row_ok(check: &ToolCheck) -> bool {
+    check.path.is_some() || check.satisfied_without_binary
+}
+
+fn tool_row_subtitle(check: &ToolCheck) -> String {
+    if !tool_row_ok(check) {
+        return if let Some(d) = &check.detail {
+            format!("{d} — {}", check.install_hint)
+        } else {
+            format!("missing — install: {}", check.install_hint)
+        };
+    }
+    if check.path.is_some() {
+        if let Some(via) = check.resolved_via {
+            return format!("{} — using `{via}`", check.purpose);
+        }
+        return check.purpose.to_string();
+    }
+    check
+        .detail
+        .clone()
+        .unwrap_or_else(|| check.purpose.to_string())
+}
+
 fn render_tool_row(check: &ToolCheck) -> ActionRow {
+    let subtitle = tool_row_subtitle(check);
     let row = ActionRow::builder()
         .title(check.name)
-        .subtitle(check.purpose)
+        .subtitle(&subtitle)
         .build();
-    if let Some(path) = &check.path {
+    if tool_row_ok(check) {
         let ok = Image::from_icon_name("emblem-ok-symbolic");
         ok.add_css_class("success");
         row.add_suffix(&ok);
-        row.set_tooltip_text(Some(&path.to_string_lossy()));
+        let tip = if let Some(p) = &check.path {
+            p.to_string_lossy().to_string()
+        } else {
+            check.detail.clone().unwrap_or_default()
+        };
+        if !tip.is_empty() {
+            row.set_tooltip_text(Some(&tip));
+        }
     } else {
         let warn = Image::from_icon_name("dialog-warning-symbolic");
         warn.add_css_class("warning");
         row.add_suffix(&warn);
-        row.set_subtitle(&format!("missing — install: {}", check.install_hint));
     }
     row
+}
+
+fn connect_open_packaging_target(
+    btn: &Button,
+    toasts: &ToastOverlay,
+    target: PackagingConfigTarget,
+) {
+    let toasts = toasts.clone();
+    btn.connect_clicked(move |btn| {
+        let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
+            toasts.add_toast(Toast::new(
+                "Could not find a parent window for opening the path.",
+            ));
+            return;
+        };
+        let path = preflight::packaging_config_path(target);
+        let file = gio::File::for_path(path);
+        let launcher = FileLauncher::new(Some(&file));
+        let toasts_launch = toasts.clone();
+        launcher.launch(Some(&parent), None::<&gio::Cancellable>, move |res| {
+            if let Err(e) = res {
+                toasts_launch.add_toast(Toast::new(&format!(
+                    "Could not open {}: {e}",
+                    path.display()
+                )));
+            }
+        });
+    });
+}
+
+fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> PreferencesGroup {
+    let group = PreferencesGroup::builder()
+        .title("Packaging configuration")
+        .description(
+            "Opens fixed system paths with your desktop default application (via GTK). \
+             If nothing happens, set a default handler for `.conf` files or folders.",
+        )
+        .build();
+
+    let makepkg_row = ActionRow::builder()
+        .title("makepkg.conf")
+        .subtitle("/etc/makepkg.conf")
+        .build();
+    let makepkg_btn = Button::builder()
+        .label("Open")
+        .valign(Align::Center)
+        .css_classes(["pill"])
+        .build();
+    makepkg_row.add_suffix(&makepkg_btn);
+    connect_open_packaging_target(&makepkg_btn, toasts, PackagingConfigTarget::MakepkgConf);
+    group.add(&makepkg_row);
+
+    let devtools_row = ActionRow::builder()
+        .title("devtools files")
+        .subtitle("/usr/share/devtools")
+        .build();
+    let devtools_btn = Button::builder()
+        .label("Open")
+        .valign(Align::Center)
+        .css_classes(["pill"])
+        .build();
+    devtools_row.add_suffix(&devtools_btn);
+    connect_open_packaging_target(
+        &devtools_btn,
+        toasts,
+        PackagingConfigTarget::DevtoolsShareDir,
+    );
+    group.add(&devtools_row);
+
+    group
 }

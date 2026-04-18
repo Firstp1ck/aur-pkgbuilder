@@ -9,14 +9,88 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, ComboRow, EntryRow, PreferencesGroup, Window};
-use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Orientation, StringList};
+use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, PreferencesGroup, Window};
+use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Label, Orientation, StringList};
 
+use crate::runtime;
 use crate::ui::folder_pick;
 use crate::workflow::package::{PackageDef, PackageKind};
+use crate::workflow::pkgbase::{self, PkgbasePublishNs};
 use crate::workflow::sync as sync_wf;
 
 type SaveCallback = Rc<RefCell<Option<Box<dyn FnOnce(PackageDef)>>>>;
+
+const PKGBASE_FIELD_HINT: &str =
+    "Use the pkgbase (AUR repository name), not a split pkgname. Example: my-pkg-bin.";
+
+fn set_pkgbase_feedback(label: &Label, text: &str, as_error: bool) {
+    label.set_label(text);
+    label.set_visible(true);
+    if as_error {
+        label.add_css_class("error");
+    } else {
+        label.remove_css_class("error");
+    }
+}
+
+fn apply_pkgbase_namespace_result(
+    window: &Window,
+    id_feedback: &Label,
+    once: &SaveCallback,
+    pkg: PackageDef,
+    ns: PkgbasePublishNs,
+) {
+    if ns.official_repo_hit {
+        set_pkgbase_feedback(
+            id_feedback,
+            "This pkgbase matches an official repository package. Pick another name for the AUR.",
+            true,
+        );
+        let body = "Official repositories already publish a package with this name. The AUR will reject a colliding pkgbase—choose a different name.";
+        let d = AlertDialog::new(Some("Name unavailable"), Some(body));
+        d.add_responses(&[("ok", "_OK")]);
+        let window = window.clone();
+        d.choose(
+            Some(&window),
+            Option::<&gtk4::gio::Cancellable>::None,
+            |_| {},
+        );
+        return;
+    }
+    if ns.aur_pkgbase_hit {
+        set_pkgbase_feedback(
+            id_feedback,
+            "This pkgbase already exists on the AUR. Continue only if you maintain or adopt it.",
+            true,
+        );
+        let body = "The AUR lists this pkgbase already. Choose Continue if you are adopting or updating it. Otherwise Cancel and pick a new name.";
+        let d = AlertDialog::new(Some("Package found on AUR"), Some(body));
+        d.add_responses(&[("cancel", "_Cancel"), ("continue", "_Continue")]);
+        d.set_default_response(Some("cancel"));
+        let win_parent = window.clone();
+        let win_close = window.clone();
+        let once = once.clone();
+        let pkg = pkg.clone();
+        d.choose(
+            Some(&win_parent),
+            Option::<&gtk4::gio::Cancellable>::None,
+            move |response| {
+                if response.as_str() == "continue" {
+                    if let Some(cb) = once.borrow_mut().take() {
+                        cb(pkg);
+                    }
+                    win_close.close();
+                }
+            },
+        );
+        return;
+    }
+    set_pkgbase_feedback(id_feedback, PKGBASE_FIELD_HINT, false);
+    if let Some(cb) = once.borrow_mut().take() {
+        cb(pkg);
+    }
+    window.close();
+}
 
 fn preview_pkg(
     id: &str,
@@ -121,10 +195,30 @@ pub fn open(
         .margin_end(16)
         .build();
 
-    let group = PreferencesGroup::new();
+    let group = if existing.is_some() {
+        PreferencesGroup::new()
+    } else {
+        PreferencesGroup::builder()
+            .description(
+                "When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
+                 and push; there is no separate approval queue. A first-time Git warning about an \
+                 empty repository is normal until the first accepted push.",
+            )
+            .build()
+    };
+
+    let id_feedback = Label::builder()
+        .label(PKGBASE_FIELD_HINT)
+        .wrap(true)
+        .halign(Align::Start)
+        .margin_bottom(4)
+        .build();
+    if existing.is_some() {
+        id_feedback.set_visible(false);
+    }
 
     let id_row = EntryRow::builder()
-        .title("AUR package name (e.g. my-pkg-bin)")
+        .title("AUR pkgbase (repository name)")
         .build();
     let title_row = EntryRow::builder().title("Display title").build();
     let subtitle_row = EntryRow::builder().title("Short description").build();
@@ -195,6 +289,7 @@ pub fn open(
         *legacy_cleared.borrow(),
     );
 
+    group.add(&id_feedback);
     group.add(&id_row);
     group.add(&title_row);
     group.add(&subtitle_row);
@@ -216,7 +311,11 @@ pub fn open(
         let existing_for = existing.clone();
         let destination_dir_state = destination_dir_state.clone();
         let legacy_cleared = legacy_cleared.clone();
+        let id_feedback_c = id_feedback.clone();
         id_row.connect_changed(move |_entry| {
+            if existing_for.is_none() {
+                set_pkgbase_feedback(&id_feedback_c, PKGBASE_FIELD_HINT, false);
+            }
             set_dest_subtitle(
                 &dest_row,
                 work_for_preview.as_deref(),
@@ -310,6 +409,7 @@ pub fn open(
 
     {
         let window = window.clone();
+        let id_feedback = id_feedback.clone();
         let id_row = id_row.clone();
         let title_row = title_row.clone();
         let subtitle_row = subtitle_row.clone();
@@ -319,14 +419,25 @@ pub fn open(
         let destination_dir_state = destination_dir_state.clone();
         let legacy_cleared = legacy_cleared.clone();
         let existing_rc = existing_rc.clone();
+        let save_primary = save.clone();
+        let save_busy = save.clone();
         let once: SaveCallback = Rc::new(RefCell::new(Some(Box::new(on_save))));
-        save.connect_clicked(move |btn| {
+        save_primary.connect_clicked(move |btn| {
+            btn.remove_css_class("error");
             let id = id_row.text().trim().to_string();
             let url = url_row.text().trim().to_string();
             if id.is_empty() || url.is_empty() {
                 btn.add_css_class("error");
                 return;
             }
+            if existing_rc.is_none()
+                && let Err(e) = pkgbase::validate_aur_pkgbase_id(&id)
+            {
+                set_pkgbase_feedback(&id_feedback, &e.to_string(), true);
+                btn.add_css_class("error");
+                return;
+            }
+
             let title = non_empty(&title_row.text()).unwrap_or_else(|| id.clone());
             let subtitle = non_empty(&subtitle_row.text()).unwrap_or_default();
             let icon_name = non_empty(&icon_row.text());
@@ -354,7 +465,7 @@ pub fn open(
                 .and_then(|p| p.pkgbuild_refreshed_at_unix);
 
             let pkg = PackageDef {
-                id,
+                id: id.clone(),
                 title,
                 subtitle,
                 kind,
@@ -364,10 +475,51 @@ pub fn open(
                 sync_subdir,
                 pkgbuild_refreshed_at_unix: preserved_refresh,
             };
-            if let Some(cb) = once.borrow_mut().take() {
-                cb(pkg);
+
+            if existing_rc.is_some() {
+                if let Some(cb) = once.borrow_mut().take() {
+                    cb(pkg);
+                }
+                window.close();
+                return;
             }
-            window.close();
+
+            let id_for_probe = id.clone();
+            save_busy.set_sensitive(false);
+            set_pkgbase_feedback(
+                &id_feedback,
+                "Checking AUR and official repositories…",
+                false,
+            );
+            let window_c = window.clone();
+            let id_feedback_c = id_feedback.clone();
+            let save_c = save_busy.clone();
+            let once_c = once.clone();
+            let pkg_ready = pkg;
+            runtime::spawn(
+                async move { pkgbase::check_pkgbase_publish_namespace(&id_for_probe).await },
+                move |res| {
+                    save_c.set_sensitive(true);
+                    match res {
+                        Err(e) => {
+                            set_pkgbase_feedback(
+                                &id_feedback_c,
+                                &format!(
+                                    "Could not verify this name ({e}). Fix the network issue, then click Save again."
+                                ),
+                                true,
+                            );
+                        }
+                        Ok(ns) => apply_pkgbase_namespace_result(
+                            &window_c,
+                            &id_feedback_c,
+                            &once_c,
+                            pkg_ready,
+                            ns,
+                        ),
+                    }
+                },
+            );
         });
     }
 

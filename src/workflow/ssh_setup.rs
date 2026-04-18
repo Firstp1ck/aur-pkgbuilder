@@ -5,15 +5,22 @@
 //! implemented here. A one-shot [`full_setup`] glues them together so the
 //! UI can expose a single "do everything" action.
 //!
+//! Before writing `known_hosts`, [`ensure_known_hosts_entry`] fingerprints
+//! `ssh-keyscan` output and checks each SHA256 token against the list
+//! published on [`AUR_WEB_HOMEPAGE`] (HTTPS refresh), falling back to bundled
+//! values when the fetch is unusable.
+//!
 //! Conventions:
 //! - The AUR key is always `~/.ssh/aur` (and `~/.ssh/aur.pub`). Existing
 //!   files are never overwritten — we reuse the key in-place.
 //! - `~/.ssh` is created with mode `0700` and the private key with `0600`
 //!   if we create them.
 
+use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::Context;
 use thiserror::Error;
@@ -22,9 +29,24 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 pub const AUR_HOSTNAME: &str = "aur.archlinux.org";
-pub const AUR_ACCOUNT_URL: &str = "https://aur.archlinux.org/account/";
+/// AUR web root — the logged-out homepage lists current SSH host key fingerprints.
+pub const AUR_WEB_HOMEPAGE: &str = "https://aur.archlinux.org/";
+/// New AUR account registration page (browser).
+pub const AUR_REGISTER_URL: &str = "https://aur.archlinux.org/register";
 /// File name of the canonical AUR SSH key.
 pub const AUR_KEY_NAME: &str = "aur";
+
+/// SHA256 host-key fingerprints published on the AUR homepage and ArchWiki.
+///
+/// Details:
+/// - Used when the HTTPS refresh in [`trusted_aur_ssh_hostkey_sha256`] fails
+///   or returns too few matches (HTML layout change).
+/// - Keep in sync with https://aur.archlinux.org/ — rotate with server key updates.
+const AUR_SSH_HOSTKEY_SHA256_FALLBACK: &[&str] = &[
+    "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4",
+    "SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI",
+    "SHA256:5s5cIyReIfNNVGRFdDbe3hdYiI5OelHGpw2rOUud3Q8",
+];
 
 #[derive(Debug, Error)]
 pub enum SshSetupError {
@@ -46,6 +68,8 @@ pub struct SshKey {
     pub algorithm: String,
     /// Trailing comment on the public key, typically `user@host`.
     pub comment: String,
+    /// `ssh-keygen -lf` SHA256 token (`SHA256:…`) when the tool succeeds.
+    pub fingerprint_sha256: Option<String>,
 }
 
 impl SshKey {
@@ -94,6 +118,24 @@ pub struct FullSetupReport {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// What: Read `ssh-keygen -lf` for a `.pub` file and return the `SHA256:…` token.
+async fn lf_fingerprint_pub_file(pub_path: &Path) -> Option<String> {
+    let output = match Command::new("ssh-keygen")
+        .arg("-lf")
+        .arg(pub_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return None,
+    };
+    let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    sha256_token_from_keygen_lf_line(&line)
+}
+
 /// Functional: scan `~/.ssh` for `*.pub` files with a matching private key.
 pub async fn list_keys() -> Result<Vec<SshKey>, SshSetupError> {
     let ssh_dir = ssh_dir()?;
@@ -115,11 +157,13 @@ pub async fn list_keys() -> Result<Vec<SshKey>, SshSetupError> {
             match read_public_key(&pub_path).await {
                 Ok(contents) => {
                     let (algorithm, comment) = parse_public_key_header(&contents);
+                    let fingerprint_sha256 = lf_fingerprint_pub_file(&pub_path).await;
                     out.push(SshKey {
                         private_path,
                         public_path: pub_path,
                         algorithm,
                         comment,
+                        fingerprint_sha256,
                     });
                 }
                 Err(_) => continue,
@@ -142,10 +186,57 @@ pub async fn read_public_key(path: &Path) -> Result<String, SshSetupError> {
     Ok(buf.trim_end_matches('\n').to_string())
 }
 
-/// Functional: `xdg-open` the AUR account settings where SSH keys are pasted.
-pub async fn open_aur_account_page() -> Result<(), SshSetupError> {
+/// What: Collapse an OpenSSH public key blob into one trimmed line for the AUR web form.
+///
+/// Inputs:
+/// - `raw`: file contents or pasted text (may include comments or stray newlines).
+///
+/// Output:
+/// - A single-line `algorithm base64 [comment]` string suitable for clipboard paste.
+///
+/// Details:
+/// - Drops blank lines and `#` comment lines; joins remaining non-empty lines with spaces.
+pub fn normalize_pubkey_for_clipboard(raw: &str) -> String {
+    let joined: String = raw
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join(" ");
+    joined.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// What: Build the AUR profile edit URL for pasting SSH keys (`…/account/USER/edit`).
+///
+/// Inputs:
+/// - `username`: AUR login name (same as configured in the app).
+///
+/// Output:
+/// - HTTPS URL string, or an error if `username` is empty or not URL-path-safe.
+///
+/// Details:
+/// - Only ASCII letters, digits, `_`, `-`, and `.` are allowed so the path cannot be abused.
+pub fn aur_account_edit_url(username: &str) -> Result<String, SshSetupError> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "AUR username is empty — set it on the Connection or onboarding screen"
+        )));
+    }
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "AUR username contains characters that are not allowed in the account URL"
+        )));
+    }
+    Ok(format!("https://aur.archlinux.org/account/{username}/edit"))
+}
+
+async fn open_https_in_browser(url: &str) -> Result<(), SshSetupError> {
     let status = Command::new("xdg-open")
-        .arg(AUR_ACCOUNT_URL)
+        .arg(url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -160,6 +251,85 @@ pub async fn open_aur_account_page() -> Result<(), SshSetupError> {
     Ok(())
 }
 
+/// Functional: `xdg-open` the logged-in user’s AUR account edit page (SSH keys).
+pub async fn open_aur_account_page(username: &str) -> Result<(), SshSetupError> {
+    let url = aur_account_edit_url(username)?;
+    open_https_in_browser(&url).await
+}
+
+/// Functional: `xdg-open` the AUR registration page ([`AUR_REGISTER_URL`]).
+pub async fn open_aur_register_page() -> Result<(), SshSetupError> {
+    open_https_in_browser(AUR_REGISTER_URL).await
+}
+
+/// What: List identities currently loaded in `ssh-agent`.
+///
+/// Output:
+/// - Human-readable listing from `ssh-add -l`, or a short note when the agent is empty.
+///
+/// Details:
+/// - When `ssh-add` exits with “no identities”, this still returns `Ok` so the UI can toast it.
+pub async fn list_ssh_agent_keys() -> Result<String, SshSetupError> {
+    let output = Command::new("ssh-add")
+        .arg("-l")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| "spawning ssh-add -l")?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        if stdout.is_empty() {
+            return Ok("(ssh-add returned no output)".into());
+        }
+        return Ok(stdout);
+    }
+    let combined = format!("{stdout} {stderr}").to_lowercase();
+    if combined.contains("no identities") {
+        return Ok("ssh-agent has no keys loaded.".into());
+    }
+    let msg = if stderr.is_empty() { stdout } else { stderr };
+    Err(SshSetupError::Other(anyhow::anyhow!(
+        "ssh-add -l failed: {msg}"
+    )))
+}
+
+/// What: Load a private key into `ssh-agent` (non-interactive when the key has no passphrase).
+///
+/// Inputs:
+/// - `private_key`: path to the private key file (for example `~/.ssh/aur`).
+///
+/// Output:
+/// - `Ok` with trimmed stdout when `ssh-add` succeeds.
+///
+/// Details:
+/// - Passphrase-protected keys need a TTY or `SSH_ASKPASS`; failures surface as errors.
+pub async fn ssh_add_private_key(private_key: &Path) -> Result<String, SshSetupError> {
+    let output = Command::new("ssh-add")
+        .arg(private_key)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| format!("spawning ssh-add {}", private_key.display()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        return Ok(if stdout.is_empty() {
+            "Key added to ssh-agent.".into()
+        } else {
+            stdout
+        });
+    }
+    let detail = if stderr.is_empty() { stdout } else { stderr };
+    Err(SshSetupError::Other(anyhow::anyhow!(
+        "ssh-add failed: {detail}"
+    )))
+}
+
 /// Ensure `~/.ssh/aur` exists. Reuses an existing file when present,
 /// otherwise generates a fresh ed25519 key.
 pub async fn ensure_aur_key(comment: &str) -> Result<(SshKey, KeyState), SshSetupError> {
@@ -172,12 +342,14 @@ pub async fn ensure_aur_key(comment: &str) -> Result<(SshKey, KeyState), SshSetu
     if private_path.is_file() {
         let contents = read_public_key(&public_path).await.unwrap_or_default();
         let (algorithm, existing_comment) = parse_public_key_header(&contents);
+        let fingerprint_sha256 = lf_fingerprint_pub_file(&public_path).await;
         return Ok((
             SshKey {
                 private_path,
                 public_path,
                 algorithm,
                 comment: existing_comment,
+                fingerprint_sha256,
             },
             KeyState::Reused,
         ));
@@ -212,12 +384,14 @@ pub async fn ensure_aur_key(comment: &str) -> Result<(SshKey, KeyState), SshSetu
 
     let contents = read_public_key(&public_path).await?;
     let (algorithm, existing_comment) = parse_public_key_header(&contents);
+    let fingerprint_sha256 = lf_fingerprint_pub_file(&public_path).await;
     Ok((
         SshKey {
             private_path,
             public_path,
             algorithm,
             comment: existing_comment,
+            fingerprint_sha256,
         },
         KeyState::Generated,
     ))
@@ -236,6 +410,9 @@ pub async fn ensure_known_hosts_entry() -> Result<KnownHostsState, SshSetupError
             "ssh-keyscan returned no host keys"
         )));
     }
+
+    let trusted = trusted_aur_ssh_hostkey_sha256().await;
+    verify_keyscan_matches_trusted(&scanned, &trusted).await?;
 
     let dir = ssh_dir()?;
     ensure_dir_with_perms(&dir, 0o700).await?;
@@ -423,6 +600,119 @@ async fn fingerprint_of(line: &str) -> Result<String, SshSetupError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Pulls the `SHA256:…` token from one line of `ssh-keygen -lf` output.
+fn sha256_token_from_keygen_lf_line(line: &str) -> Option<String> {
+    const PREFIX: &str = "SHA256:";
+    let trimmed = line.trim();
+    let idx = trimmed.find(PREFIX)?;
+    let rest = trimmed.get(idx..)?;
+    let after = rest.get(PREFIX.len()..)?;
+    let end_after = after
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '='))
+        .map(|(i, _)| i)
+        .unwrap_or(after.len());
+    let b64 = after.get(..end_after)?;
+    let token = format!("{PREFIX}{b64}");
+    if token.len() > PREFIX.len() + 8 {
+        Some(token)
+    } else {
+        None
+    }
+}
+
+fn plausible_openssh_hostkey_sha256(fp: &str) -> bool {
+    let Some(suffix) = fp.strip_prefix("SHA256:") else {
+        return false;
+    };
+    (40..=48).contains(&suffix.len())
+        && suffix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+}
+
+fn extract_sha256_fingerprints_from_html(html: &str) -> Vec<String> {
+    const PREFIX: &str = "SHA256:";
+    let mut out = Vec::new();
+    for (pos, _) in html.match_indices(PREFIX) {
+        let tail = &html[pos + PREFIX.len()..];
+        let end = tail
+            .char_indices()
+            .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '='))
+            .map(|(i, _)| i)
+            .unwrap_or(tail.len());
+        let b64 = tail.get(..end).unwrap_or("");
+        let token = format!("{PREFIX}{b64}");
+        if plausible_openssh_hostkey_sha256(&token) {
+            out.push(token);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+async fn fetch_aur_ssh_hostkey_sha256_refresh() -> Result<Vec<String>, SshSetupError> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| SshSetupError::Other(anyhow::anyhow!(e)))?;
+    let text = client
+        .get(AUR_WEB_HOMEPAGE)
+        .send()
+        .await
+        .with_context(|| format!("GET {AUR_WEB_HOMEPAGE}"))?
+        .error_for_status()
+        .with_context(|| format!("GET {AUR_WEB_HOMEPAGE}"))?
+        .text()
+        .await
+        .with_context(|| "reading AUR homepage body")?;
+    Ok(extract_sha256_fingerprints_from_html(&text))
+}
+
+async fn trusted_aur_ssh_hostkey_sha256() -> Vec<String> {
+    match fetch_aur_ssh_hostkey_sha256_refresh().await {
+        Ok(v) if (3..=10).contains(&v.len()) => v,
+        _ => AUR_SSH_HOSTKEY_SHA256_FALLBACK
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+    }
+}
+
+async fn verify_keyscan_matches_trusted(
+    scanned: &str,
+    trusted: &[String],
+) -> Result<(), SshSetupError> {
+    let set: HashSet<String> = trusted.iter().cloned().collect();
+    let mut saw_key_line = false;
+    for line in scanned.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        saw_key_line = true;
+        let lf = fingerprint_of(trimmed).await?;
+        let token = sha256_token_from_keygen_lf_line(&lf).ok_or_else(|| {
+            SshSetupError::Other(anyhow::anyhow!(
+                "could not parse SHA256 fingerprint from ssh-keygen output: {lf}"
+            ))
+        })?;
+        if !set.contains(&token) {
+            return Err(SshSetupError::Other(anyhow::anyhow!(
+                "scanned host key {token} is not in the published AUR fingerprint list — refusing to write known_hosts. Compare with {AUR_WEB_HOMEPAGE}"
+            )));
+        }
+    }
+    if !saw_key_line {
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "ssh-keyscan produced no host key lines to verify"
+        )));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // ~/.ssh/config upsert
 // ---------------------------------------------------------------------------
@@ -560,5 +850,64 @@ Host github.com
         assert!(out.contains("~/.ssh/aur"));
         assert!(!out.contains("~/.ssh/old"));
         assert!(out.contains("Host github.com"));
+    }
+
+    #[test]
+    fn normalize_pubkey_trims_and_joins() {
+        let raw = "  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI\n  comment with spaces  \n";
+        let out = normalize_pubkey_for_clipboard(raw);
+        assert_eq!(
+            out,
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI comment with spaces"
+        );
+    }
+
+    #[test]
+    fn normalize_pubkey_drops_hash_lines() {
+        let raw = "# ignore me\nssh-rsa AAAAB3 comment\n";
+        assert_eq!(
+            normalize_pubkey_for_clipboard(raw),
+            "ssh-rsa AAAAB3 comment"
+        );
+    }
+
+    #[test]
+    fn extract_fps_from_homepage_snippet() {
+        let html = r#"<p>Ed25519: SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4</p>
+            <p>ECDSA: SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI</p>
+            junk SHA256:notvalidbase64!!"#;
+        let fps = extract_sha256_fingerprints_from_html(html);
+        assert!(fps.contains(&"SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4".to_string()));
+        assert!(fps.contains(&"SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI".to_string()));
+    }
+
+    #[test]
+    fn sha256_token_from_lf_parses_openssh_line() {
+        let line =
+            "256 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4 aur.archlinux.org (ED25519)";
+        assert_eq!(
+            sha256_token_from_keygen_lf_line(line).as_deref(),
+            Some("SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4")
+        );
+    }
+
+    #[test]
+    fn aur_account_edit_url_builds_path() {
+        assert_eq!(
+            aur_account_edit_url("SomeUser").unwrap(),
+            "https://aur.archlinux.org/account/SomeUser/edit"
+        );
+        assert_eq!(
+            aur_account_edit_url("  foo_bar-1.2  ").unwrap(),
+            "https://aur.archlinux.org/account/foo_bar-1.2/edit"
+        );
+    }
+
+    #[test]
+    fn aur_account_edit_url_rejects_empty_and_unsafe() {
+        assert!(aur_account_edit_url("").is_err());
+        assert!(aur_account_edit_url("   ").is_err());
+        assert!(aur_account_edit_url("evil/name").is_err());
+        assert!(aur_account_edit_url("x y").is_err());
     }
 }

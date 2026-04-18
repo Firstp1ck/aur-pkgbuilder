@@ -58,7 +58,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .title("Login")
         .description(
             "No password is exchanged. Your SSH key is set up separately on the \
-             AUR connection screen — that's what authenticates pushes.",
+             AUR connection screen — that's what authenticates pushes. Brand-new AUR accounts \
+             are sometimes held for manual anti-spam review; if login on the website fails, \
+             wait for approval before pasting SSH keys.",
         )
         .build();
     let username_row = EntryRow::builder().title("AUR username").build();
@@ -131,6 +133,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     {
         let state = state.clone();
         let toasts = toasts.clone();
+        let shell = shell.clone();
         let username_row = username_row.clone();
         let fetch_spinner = fetch_spinner.clone();
         let fetch_btn_inner = fetch_btn.clone();
@@ -145,6 +148,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             }
             state.borrow_mut().config.aur_username = Some(username.clone());
             let _ = state.borrow().config.save();
+            shell.refresh_connection_aur_username_field(&state);
 
             fetch_spinner.start();
             fetch_btn_inner.set_sensitive(false);
@@ -233,8 +237,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             }
             toasts.add_toast(Toast::new(&format!("Imported {count} package(s)")));
             shell.refresh_tab_headers_from_state(&state);
-            let page =
-                ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromOnboarding);
+            let page = ui::ssh_setup::build(
+                &nav,
+                &shell,
+                &state,
+                ui::ssh_setup::SshSetupFlavor::FromOnboarding,
+            );
             nav.push(&page);
         });
     }

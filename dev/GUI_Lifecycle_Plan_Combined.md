@@ -21,6 +21,9 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 | SSH probe exit code        | “Show result” of SSH test                    | Success string `Welcome…`; exit code may be non-zero                | **Compass + observed aurweb behavior**: treat **banner text**, not exit code, as the signal. The app already looks for `Welcome` in `preflight::probe_aur_ssh`.                                                                                                                                                                                                                  |
 
 
+**Current tree (UX vs this table):** Rows on **first-time clone**, **community review vs gate**, and **publication immediacy** are reflected in copy on **Publish** (`ui/publish.rs` — intro, “Publication expectations” group, tooltips/toasts), with shorter non-duplicative echoes on **Sync** (`ui/sync.rs` — “Sync and Publish” group) and **Add package** (`ui/package_editor.rs` — group description for new entries only, plus **C4**/**C5** pkgbase hint + validation + namespace probe on **Save**). A **standalone first-pkgbase wizard** is still not present; see **C3**.
+
+
 ---
 
 ## Cross-cutting (both documents)
@@ -44,34 +47,36 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 
 | #   | Statement                                                                                                                       | Status                                                                                         | Priority |
 | --- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------- |
-| A1  | Link / open AUR account; registration is manual (browser)                                                                       | **Done** — `xdg-open` AUR account URL                                                          | —        |
+| A1  | Link / open AUR account; registration is manual (browser)                                                                       | **Done** — With username: `xdg-open` on `https://aur.archlinux.org/account/<user>/edit` via `ssh_setup::open_aur_account_page` / `aur_account_edit_url`. **Without** username: `ui/ssh_setup` shows `adw::Dialog` (padded title/body + `EntryRow`; **Cancel** closes; **Continue** → `open_aur_register_page` / `AUR_REGISTER_URL`; **Save and open** runs `aur_account::apply_aur_username_with_registry_check` like Connection, then opens account URL). | —        |
 | A2  | Generate **dedicated** AUR key; **never** overwrite existing private key                                                        | **Done** — `ensure_aur_key`                                                                    | —        |
 | A3  | Show public key; copy to clipboard                                                                                              | **Done** — `ui/ssh_setup`                                                                      | —        |
 | A4  | Optional `~/.ssh/config` for AUR host with `IdentityFile`                                                                       | **Done** — `write_ssh_config_entry`                                                            | —        |
 | A5  | `IdentitiesOnly yes` to avoid “too many authentication failures”                                                                | **Done** — in rendered block                                                                   | —        |
-| A6  | List **all** existing keys under `~/.ssh` with fingerprints (`ssh-keygen -lf`)                                                  | **Partial** — `list_keys` exists; UI depth varies                                              | P2       |
+| A6  | List **all** existing keys under `~/.ssh` with fingerprints (`ssh-keygen -lf`)                                                  | **Done** — `list_keys` + per-`.pub` `ssh-keygen -lf` SHA256 on each row in `ui/ssh_setup`       | —        |
 | A7  | SSH connectivity test; parse **Welcome** / key errors                                                                           | **Done** — `preflight::probe_aur_ssh`                                                          | —        |
-| A8  | Host key handling: verify fingerprints against **published** AUR keys (Ed25519 / ECDSA / RSA SHA256), refresh path vs hard-code | **Missing** — `ssh-keyscan` + append + show fingerprints; **no** comparison to known-good list | **P0**   |
-| A9  | Normalize clipboard pubkey (single line, trim) to reduce “invalid key” paste errors                                             | **Missing**                                                                                    | P2       |
-| A10 | Passphrase recommendation + `ssh-add` / agent verification step                                                                 | **Missing** — keys generated with empty passphrase `-N ""` today                               | P1       |
-| A11 | Note: multiple keys in AUR profile = newline-separated; one pubkey → one account                                                | **Partial** — not all copy UX copydeck                                                         | P3       |
-| A12 | Note: new AUR accounts may require manual approval (spam); set expectations in wizard                                           | **Missing**                                                                                    | P2       |
+| A8  | Host key handling: verify fingerprints against **published** AUR keys (Ed25519 / ECDSA / RSA SHA256), refresh path vs hard-code | **Done** — `ssh-keyscan` lines verified against HTTPS scrape of `AUR_WEB_HOMEPAGE` (3–10 plausible `SHA256:` tokens) else bundled fallback; refuse `known_hosts` append on mismatch | —        |
+| A9  | Normalize clipboard pubkey (single line, trim) to reduce “invalid key” paste errors                                             | **Done** — `normalize_pubkey_for_clipboard` + copy path in `ui/ssh_setup`                      | —        |
+| A10 | Passphrase recommendation + `ssh-add` / agent verification step                                                                 | **Partial** — UI copy + “Check agent” / `ssh-add` actions; `ensure_aur_key` still uses `-N ""` | P1       |
+| A11 | Note: multiple keys in AUR profile = newline-separated; one pubkey → one account                                                | **Done** — Publish group description in `ui/ssh_setup`                                         | —        |
+| A12 | Note: new AUR accounts may require manual approval (spam); set expectations in wizard                                           | **Done** — onboarding Login group description in `ui/onboarding.rs`                            | —        |
+| A13 | View/change **AUR username** on Connection; apply saves only after RPC check; Home **red** rows for registry ids not in maintainer∪co-maint RPC set | **Done** — `ui/connection.rs` (EntryRow apply), `aur_account::{apply_aur_username_with_registry_check, …}`, `state::AppState::aur_account_mismatch_ids`, `ui/home.rs`, `MainShell::refresh_home_list`. **Also:** Connection username row is registered on `MainShell` and refreshed when the username is saved from the SSH-setup missing-user dialog or onboarding fetch (`register_connection_aur_username_row` / `refresh_connection_aur_username_field` in `ui/shell.rs`). | —        |
 
 
 ---
 
 ## Stage B — Tooling and environment
 
+**Scope:** everything the maintainer needs on the host *before* touching a pkgbase — core CLI tools on `PATH`, completeness of the build toolchain (`base-devel`), checksum helpers, and (later) clean-chroot entrypoints plus discoverable config files. **Connection** shows **Required tools** (`preflight::check_tools`), **Recommended environment** (one async fill: `preflight::check_environment_recommended` → `check_base_devel_group`, `check_fakeroot_sentinel`, `check_devtools_bundle`; `preflight::ToolCheck` uses `satisfied_without_binary` + `detail` for the `pacman -Qg` row), **Packaging configuration** (`gtk4::FileLauncher` on the main thread in `ui/connection` + `preflight::packaging_config_path` / `PackagingConfigTarget`), and **Validate** (`workflow/validate.rs`) for deeper optional steps (e.g. fakeroot build).
 
-| #   | Statement                                                             | Status                                                                              | Priority |
-| --- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------- |
-| B1  | Detect `makepkg`, `git`, `ssh`                                        | **Done** — `preflight::check_tools`                                                 | —        |
-| B2  | Detect / require `base-devel` effectively (not only `makepkg` binary) | **Missing** — install hint points at `base-devel` but no group probe                | P2       |
-| B3  | Detect `updpkgsums` (`pacman-contrib`)                                | **Done**                                                                            | —        |
-| B4  | Detect `devtools` / document clean-chroot path                        | **Missing**                                                                         | **P1**   |
-| B5  | Optional: `pkgbuild-introspection` / `mksrcinfo`                      | **Missing** — app uses `makepkg --printsrcinfo` only (aligned with modern practice) | P3       |
-| B6  | Open `makepkg.conf` / devtools conf snippets in preferred editor      | **Missing**                                                                         | P3       |
-| B7  | Explain why chroot + `base-devel` matter                              | **Partial** — scattered hints; no dedicated tips panel                              | P2       |
+| #   | Statement                                                             | Status                                                                                                                                                                                                                                                                                                                                                         | Priority |
+| --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| B1  | Detect `makepkg`, `git`, `ssh`                                        | **Done** — `preflight::check_tools` (`which` per program; list lives in `preflight.rs`); rows from `ui/connection::render_tool_row` (subtitle = purpose, missing row shows `install_hint`).                                                                                                                                                                      | —        |
+| B2  | Detect / require `base-devel` effectively (not only `makepkg` binary) | **Done** — `preflight::check_base_devel_group` runs `pacman -Qg base-devel` (non-empty ⇒ pass) plus `check_fakeroot_sentinel` as a second signal. Does **not** diff against the full sync-db group list (only “has members installed”).                                                                                                                        | —        |
+| B3  | Detect `updpkgsums` (`pacman-contrib`)                                | **Done** — same preflight table as B1; execution path `workflow/build::run_updpkgsums` + Version tab wiring (`ui/version.rs`).                                                                                                                                                                                                                                 | —        |
+| B4  | Detect `devtools` / document clean-chroot path                        | **Partial** — `preflight::check_devtools_bundle` treats first hit among `pkgctl`, `extra-x86_64-build`, `makechrootpkg` as satisfied; Connection row + wiki blurb in group description. Overlaps **G1** detection; **still missing:** chroot matrix path, `pkgctl build` wiring, and the fuller narrative planned for **G3**.                                  | **P1**   |
+| B5  | Optional: `pkgbuild-introspection` / `mksrcinfo`                      | **Missing** — app uses `makepkg --printsrcinfo` only (aligned with modern practice)                                                                                                                                                                                                                                                                            | P3       |
+| B6  | Open `makepkg.conf` / devtools conf snippets in preferred editor      | **Partial** — Connection **Packaging configuration** rows use `gtk4::FileLauncher` (main thread) with allowlisted paths from `preflight::packaging_config_path`. **Still missing:** per-snippet rows (e.g. individual `makepkg-*.conf` under `pacman.conf.d`).                                                                                                    | P3       |
+| B7  | Explain why chroot + `base-devel` matter                              | **Partial** — **Recommended environment** copy names `base-devel`, `fakeroot`, `devtools`, typical `/var/lib/archbuild`, and the clean-chroot wiki URL; **Packaging configuration** copy points at GTK + default app for `.conf` / folders. **Still missing:** dedicated tips panel / disk + sudo expectations (**G3**) once chroot builds ship.                    | P2       |
 
 
 ---
@@ -83,9 +88,9 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 | --- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------- |
 | C1  | Import packages user maintains (RPC by maintainer / co-maintainer)                  | **Done** — `onboarding` + `aur_account::fetch_my_packages`                                     | —        |
 | C2  | Per-package working directory + safe path validation                                | **Done** — `sync::package_dir`, folder pick                                                    | —        |
-| C3  | **Clone-first** new pkgbase; treat empty clone warning as informational             | **Partial** — publish path clones AUR repo; **no** dedicated “new empty namespace” wizard copy | P1       |
-| C4  | Enforce **pkgbase** naming regex; distinguish pkgbase vs pkgname for split packages | **Missing** in UI validation                                                                   | **P0**   |
-| C5  | Check AUR + official repos for duplicates before first push                         | **Missing**                                                                                    | **P0**   |
+| C3  | **Clone-first** new pkgbase; treat empty clone warning as informational             | **Partial** — `aur_git::ensure_clone` + Publish/Sync/Add-package copy (empty clone + push is public); **no** dedicated “new empty namespace” wizard | P2       |
+| C4  | Enforce **pkgbase** naming regex; distinguish pkgbase vs pkgname for split packages | **Done** — `workflow/pkgbase::validate_aur_pkgbase_id` (ASCII `[a-z0-9@._+-]+`); **Add package** row title + hint label for pkgbase vs split `pkgname`; `PackageDef::id` + `registry` header docs. **Still missing:** PKGBUILD-level split warnings (**D7**). | —        |
+| C5  | Check AUR + official repos for duplicates before first push                         | **Partial** — on **Add package** → **Save** for **new** entries: `workflow/pkgbase::check_pkgbase_publish_namespace` (`aur_account::aur_pkgbase_exists` with `PackageBase` on RPC `type=info`, plus `pacman -Si`); official hit blocks; AUR hit confirm dialog. **Still missing:** same probe as an explicit **Publish** / pre-push gate. | P1       |
 | C6  | New-package PKGBUILD templates (Rust/Python/Go/VCS `-git` / `-bin` archetypes)      | **Missing** — editor starts from synced URL content, not templated wizard                      | P1       |
 | C7  | “Monorepo / aurpublish-style” advanced layout                                       | **Missing**                                                                                    | P3       |
 
@@ -97,7 +102,7 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 
 | #   | Statement                                                                                        | Status                                        | Priority |
 | --- | ------------------------------------------------------------------------------------------------ | --------------------------------------------- | -------- |
-| D1  | Bash-aware editor (highlighting)                                                                 | **Missing** — `TextView` buffer               | P2       |
+| D1  | Bash/PKGBUILD-aware editor (highlighting)                                                                 | **Missing** — `TextView` buffer               | P2       |
 | D2  | Snippet / template insertion                                                                     | **Missing**                                   | P2       |
 | D3  | Structured form + raw PKGBUILD dual view                                                         | **Partial** — quick metadata rows + full text | P1       |
 | D4  | Field / guideline lint: SPDX licenses (`RFC 16` style), legacy `GPL` warnings, “convert to SPDX” | **Missing**                                   | P2       |
@@ -143,7 +148,7 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 
 | #   | Statement                                                              | Status                                                       | Priority |
 | --- | ---------------------------------------------------------------------- | ------------------------------------------------------------ | -------- |
-| G1  | `devtools` / `makechrootpkg` / `extra-x86_64-build` detection & config | **Missing**                                                  | **P1**   |
+| G1  | `devtools` / `makechrootpkg` / `extra-x86_64-build` detection & config | **Partial** — same binary probe as **B4** (`preflight::check_devtools_bundle` + Connection row); **still missing:** chroot matrix path, `pkgctl build` / `makechrootpkg` wiring, and config UI beyond opening `/usr/share/devtools`. | **P1**   |
 | G2  | Primary action: `pkgctl build` with `--checkpkg --namcap` (Compass)    | **Missing**                                                  | **P1**   |
 | G3  | Document disk / sudo / btrfs snapshot expectations                     | **Missing**                                                  | P2       |
 | G4  | `namcap` PKGBUILD + built package with severity UI + `-m` tag mapping  | **Partial** — optional `namcap` in validate; basic streaming | P2       |
@@ -206,11 +211,11 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 ## Suggested implementation priority (summary)
 
 1. **P0 — Push correctness**
-  Enforce **AUR `master` branch** (ArchWiki), **pkgbase validation**, **staging for all tracked files**, `**.SRCINFO` drift vs hook expectations**, **pre-push hook error parsing**, **host-key verification** against published fingerprints.
+  Enforce **AUR `master` branch** (ArchWiki), **staging for all tracked files**, `**.SRCINFO` drift vs hook expectations**, **pre-push hook error parsing**. **Pkgbase charset + bootstrap namespace checks** for new registry rows are **implemented** (`workflow/pkgbase`, `aur_account::aur_pkgbase_exists`, **Add package** in `ui/package_editor.rs`); optional **Publish**-time re-probe remains (**C5**). **Host-key verification** against published fingerprints is **implemented** (`workflow/ssh_setup` + homepage/fallback list); remaining P0 items are branch/staging/SRCINFO/push-parse as above.
 2. **P1 — Maintainer-quality loop**
-  Clean chroot (`pkgctl build` / devtools), richer **makepkg** flags, **pacman -U** test path, **dependency+AUR lookup** in editor, **clone-first / empty namespace** onboarding copy, **git identity** warnings.
+  Clean chroot **actions** (`pkgctl build` / `makechrootpkg` UI, matrix path) on top of Connection **devtools detection** (**B4** / **G1**), richer **makepkg** flags, **pacman -U** test path, **dependency+AUR lookup** in editor, optional **first-pkgbase wizard** (copy for clone-first / empty namespace already on Publish/Sync/Add package), **git identity** warnings.
 3. **P2 — Professional polish**
-  SPDX/legacy license lint, SRCINFO-focused diff, checksum diff, PTY log, `checkpkg`, dashboard columns, `nvchecker`, xdg-open maintenance links, recovery modals.
+  SPDX/legacy license lint, SRCINFO-focused diff, checksum diff, PTY log, `checkpkg`, dashboard columns, `nvchecker`, extra packaging-path shortcuts beyond Connection’s `gtk4::FileLauncher` rows, recovery modals.
 4. **P3 — Ecosystem & power users**
   REUSE tooling, monorepo mode, batch ops, cached meta dump, container smoke tests, command clipboard, log filters.
 
@@ -219,6 +224,6 @@ Each item is tagged **Done**, **Partial**, or **Missing** against the current `a
 ## Traceability
 
 - **ArchWiki** primary references used above: [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines), [Arch User Repository](https://wiki.archlinux.org/title/Arch_User_Repository), [DeveloperWiki:Building in a clean chroot](https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot) (cited in design doc for devtools role).
-- **Implemented behavior** was cross-checked against: `src/workflow/ssh_setup.rs`, `preflight.rs`, `aur_git.rs`, `build.rs` (UI + workflow), `validate.rs`, `publish.rs`, `pkgbuild_editor.rs`, `onboarding.rs`, `manage.rs`.
+- **Implemented behavior** was cross-checked against: `src/workflow/ssh_setup.rs`, `aur_account.rs`, `pkgbase.rs`, `preflight.rs`, `aur_git.rs`, `build.rs` (UI + workflow), `validate.rs`, `publish.rs`, `sync.rs`, `package_editor.rs`, `pkgbuild_editor.rs`, `onboarding.rs`, `manage.rs`, `state.rs`, `ui/connection.rs`, `ui/version.rs`, `ui/home.rs`, `ui/shell.rs`, `ui/ssh_setup.rs`.
 
 When this plan changes, update the **Status** column in place rather than forking another prose spec — keep one living backlog file.

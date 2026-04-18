@@ -82,6 +82,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
+    let sync_publish_bridge = PreferencesGroup::builder()
+        .title("Sync and Publish")
+        .description(
+            "Publish copies PKGBUILD and .SRCINFO from the destination below into the AUR Git \
+             clone, then commits when you choose. A successful push updates the public AUR \
+             immediately. On a brand-new pkgbase, the first clone may warn that the repository \
+             is empty—that is expected.",
+        )
+        .build();
+    content.append(&sync_publish_bridge);
+
     let group = PreferencesGroup::new();
     let src_row = ActionRow::builder()
         .title("Source")

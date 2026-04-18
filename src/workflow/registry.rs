@@ -28,7 +28,7 @@ const REGISTRY_HEADER: &str = "\
 // block; those lines will stay intact.
 //
 // Each entry:
-//   id            AUR pkgname (default directory name under work_dir)
+//   id            AUR pkgbase / repository name (default directory under work_dir)
 //   title         display title shown on the home card
 //   subtitle      short description
 //   kind          \"bin\" | \"git\" | \"other\" (tunes UI hints only)

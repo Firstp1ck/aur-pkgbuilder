@@ -37,8 +37,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     let sub = Label::builder()
         .label(format!(
-            "Clones (or reuses) {}, stages the new PKGBUILD and .SRCINFO, \
-             shows the diff, then commits and pushes.",
+            "Prepare clones (or reuses) the AUR Git repository at {}. For a brand-new \
+             pkgbase, Git may warn that you cloned an empty repository—that is expected \
+             until the server accepts your first push (see the Arch wiki AUR submission \
+             guidelines).\n\n\
+             Prepare stages PKGBUILD and .SRCINFO from your Sync directory into that \
+             clone, shows the diff, then you can commit and push.",
             pkg.aur_ssh_url()
         ))
         .halign(Align::Start)
@@ -47,6 +51,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["dim-label"])
         .build();
     content.append(&sub);
+
+    let publication_expectations = PreferencesGroup::builder()
+        .title("Publication expectations")
+        .description(
+            "The AUR is not moderated before publication: when your push succeeds, \
+             the updated sources are public. Asking for review on the Arch forums or \
+             mailing lists is encouraged when you are unsure, but it is voluntary and \
+             does not block or replace your own checks before you push.",
+        )
+        .build();
+    content.append(&publication_expectations);
 
     // SSH must be verified before we can git-clone/push over ssh://aur@…
     let ssh_ready = state.borrow().ssh_ok;
@@ -60,10 +75,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             .revealed(true)
             .build();
         let nav_cb = shell.nav();
+        let shell_cb = shell.clone();
         let state_cb = state.clone();
         banner.connect_button_clicked(move |_| {
             let page = ui::ssh_setup::build(
                 &nav_cb,
+                &shell_cb,
                 &state_cb,
                 ui::ssh_setup::SshSetupFlavor::FromConnection,
             );
@@ -160,7 +177,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .label("Prepare (clone + .SRCINFO + diff)")
         .sensitive(ssh_ready)
         .tooltip_text(if ssh_ready {
-            "Clones the AUR repo, regenerates .SRCINFO, and shows the diff."
+            "Clones the AUR repo if needed (an empty-repo warning on first clone is \
+             normal for a new pkgbase), regenerates .SRCINFO, and shows the diff."
         } else {
             "Set up and verify SSH first."
         })
@@ -171,6 +189,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .sensitive(false)
         .tooltip_text(if ssh_ready {
             "Runs after Prepare: commits PKGBUILD + .SRCINFO and pushes to the AUR. \
+             A successful push publishes immediately—there is no separate approval step. \
              Enabled only when the clone differs from HEAD."
         } else {
             "Set up and verify SSH first."
@@ -274,7 +293,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                             diff_buffer.set_text(&diff);
                             push_btn.set_sensitive(has_changes);
                             if has_changes {
-                                toasts.add_toast(Toast::new("Ready to push — review the diff"));
+                                toasts.add_toast(Toast::new(
+                                    "Ready to push — review the diff; push publishes immediately",
+                                ));
                             } else {
                                 toasts.add_toast(Toast::new(
                                     "No changes vs AUR — nothing to commit or push",
