@@ -103,7 +103,20 @@ jobs:
           - runner: ubuntu-24.04-arm
             asset: aur-pkgbuilder-aarch64
     runs-on: ${{ matrix.runner }}
+    # Ubuntu runners ship libadwaita 1.5; release binaries target Arch (PKGBUILD-bin).
+    container:
+      image: archlinux:latest
     steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel \
+            curl \
+            git \
+            gtk4 \
+            libadwaita \
+            pkgconf
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -114,14 +127,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-
-      - name: Install GTK4 / libadwaita headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-              libgtk-4-dev \
-              libadwaita-1-dev \
-              pkg-config
 
       - name: Build Release
         run: cargo build --release --locked

@@ -33,20 +33,25 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    # Match rust.yml: Ubuntu images lack libadwaita >= 1.6 required by adw v1_6.
+    container:
+      image: archlinux:latest
     steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel \
+            curl \
+            git \
+            gtk4 \
+            libadwaita \
+            pkgconf
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
-      - name: Install GTK4 / libadwaita headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-              libgtk-4-dev \
-              libadwaita-1-dev \
-              pkg-config
 
       - name: Cache cargo registry + build target
         uses: Swatinem/rust-cache@v2
