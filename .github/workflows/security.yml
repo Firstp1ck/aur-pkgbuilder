@@ -56,18 +56,46 @@ jobs:
   # Scans commits for accidentally committed secrets (API keys, tokens,
   # private keys, passwords). Complements GitHub's built-in secret
   # scanning with broader pattern coverage.
+  #
+  # We invoke gitleaks directly instead of gitleaks/gitleaks-action: on `push`,
+  # the action runs `git log <oldest-in-payload>^..<newest>`, which fails when
+  # the oldest commit has no parent (repo root in the same push), producing
+  # exit code 1 and a partial scan (see gitleaks-action `src/index.js` +
+  # `src/gitleaks.js`). A full `gitleaks detect` matches schedule scans and
+  # stays correct for shallow edge cases.
   secrets:
     name: secret scan
     runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.24.3"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          curl -fsSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar --no-same-owner -xzf - -C "${tmpdir}"
+          chmod +x "${tmpdir}/gitleaks"
+          echo "GITLEAKS_BIN=${tmpdir}/gitleaks" >> "${GITHUB_ENV}"
+
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          "${GITLEAKS_BIN}" detect --redact -v --exit-code=2 \
+            --report-format=sarif --report-path=results.sarif --source .
+
+      - name: Upload gitleaks SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-results.sarif
+          path: results.sarif
+          if-no-files-found: ignore
 
   # ── Cargo deny (advisories + license + ban) ────────────────────────────
   # More comprehensive than cargo-audit alone: also checks licenses and
