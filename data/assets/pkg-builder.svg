@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Colored logo for an AUR package maintenance GUI app">
+  <title>AUR package maintenance GUI app logo</title>
+  <desc>A geometric logo with an Arch-inspired blue peak above a transparent package box outlined in dark yellow.</desc>
+  <defs>
+    <linearGradient id="archBlue" x1="48" y1="36" x2="196" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2aa6df"/>
+      <stop offset="1" stop-color="#1793d1"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 28 L46 162 H86 L128 95 L170 162 H210 Z" fill="url(#archBlue)"/>
+  <g fill="none" stroke="#9a6e08" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="72" y="122" width="112" height="88" rx="18" stroke-width="8"/>
+    <path d="M128 122 V210" stroke-width="10" opacity="0.95"/>
+    <path d="M72 148 L128 178 L184 148" stroke-width="10" opacity="0.95"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=aur-pkgbuilder
+Comment=GUI for building and publishing Arch User Repository packages
+Exec=aur-pkgbuilder
+Icon=aur-pkgbuilder
+Terminal=false
+Categories=Development;PackageManager;GTK;
+Keywords=aur;pacman;makepkg;pkgbuild;arch;
+StartupNotify=true
