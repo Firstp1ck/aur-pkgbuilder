@@ -1,8 +1,13 @@
 //! Top-level tab shell: [`MainShell`] wires an [`adw::TabBar`] + [`adw::TabView`]
 //! to the main workflow steps while keeping [`adw::NavigationView`] for pushed
 //! overlays (onboarding, SSH setup, AUR SSH helper, …).
+//!
+//! Workflow tabs stay **unpinned** so [`adw::TabBar`] shows each [`adw::TabPage`]
+//! title (pinned tabs only expose the title as a tooltip). User-driven closes are
+//! rejected via [`adw::TabView::connect_close_page`]; only code paths wrapped in
+//! [`AllowProgrammaticTabClose`] may remove pages.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -54,6 +59,24 @@ struct MainShellInner {
     /// `pkgver` read for the Version tab label (best-effort).
     pkgver_tab_cache: RefCell<String>,
     periodic_connection_source: RefCell<Option<glib::SourceId>>,
+    /// When true, the next [`TabView::close_page`] emissions may finish with `confirm: true`.
+    allow_programmatic_tab_close: Cell<bool>,
+}
+
+/// RAII: enables [`MainShellInner::allow_programmatic_tab_close`] while dropping resets it.
+struct AllowProgrammaticTabClose<'a>(&'a Cell<bool>);
+
+impl<'a> AllowProgrammaticTabClose<'a> {
+    fn new(cell: &'a Cell<bool>) -> Self {
+        cell.set(true);
+        Self(cell)
+    }
+}
+
+impl Drop for AllowProgrammaticTabClose<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
 }
 
 impl MainShell {
@@ -69,6 +92,8 @@ impl MainShell {
     /// Details:
     /// - Sync through Publish are rebuilt when the selected package id changes.
     /// - Manage stays mounted; only the middle workflow tabs are replaced.
+    /// - Workflow [`adw::TabPage`]s are unpinned so tab titles stay visible; programmatic
+    ///   rebuilds temporarily allow [`adw::TabView::close_page`] while user closes are vetoed.
     pub fn install(nav: &NavigationView, state: &AppStateRef) -> Self {
         let tab_view = TabView::new();
         let tab_bar = TabBar::new();
@@ -83,25 +108,29 @@ impl MainShell {
             tabs_package_id: RefCell::new(None),
             pkgver_tab_cache: RefCell::new(String::new()),
             periodic_connection_source: RefCell::new(None),
+            allow_programmatic_tab_close: Cell::new(false),
         });
         let shell = Self {
             inner: inner.clone(),
         };
 
+        let inner_close = inner.clone();
+        tab_view.connect_close_page(move |view, page| {
+            view.close_page_finish(page, inner_close.allow_programmatic_tab_close.get());
+            glib::Propagation::Stop
+        });
+
         let home_page = crate::ui::home::build(&shell, state);
         let tp_home = tab_view.append(&home_page);
         tp_home.set_title("Home");
-        pin_workflow_tab(&tab_view, &tp_home);
 
         let conn_page = crate::ui::connection::build(&shell, state);
         let tp_conn = tab_view.append(&conn_page);
         tp_conn.set_title("Connection");
-        pin_workflow_tab(&tab_view, &tp_conn);
 
         let manage_page = crate::ui::manage::build(&shell, state);
         let tp_manage = tab_view.append(&manage_page);
         tp_manage.set_title("Manage");
-        pin_workflow_tab(&tab_view, &tp_manage);
 
         let mut pages = vec![tp_home.clone(), tp_conn.clone(), tp_manage.clone()];
         *inner.home_tab_page.borrow_mut() = Some(tp_home.clone());
@@ -166,7 +195,7 @@ impl MainShell {
             .set_title(&version_tab_title(&self.inner.pkgver_tab_cache.borrow()));
     }
 
-    /// Probe required tools + optional AUR SSH for the Connection tab icon.
+    /// Probe required tools + optional AUR SSH for the Connection tab indicator.
     pub fn spawn_connection_badge_refresh(&self, state: &AppStateRef) {
         let ssh_key = state.borrow().config.ssh_key.clone();
         let shell = self.clone();
@@ -202,11 +231,11 @@ impl MainShell {
         };
 
         let new_page = crate::ui::version::build(self, state);
+        let _allow_close = AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
         self.inner.tab_view.close_page(&old_tp);
         let new_tp = self.inner.tab_view.insert(&new_page, idx as i32);
         let title = version_tab_title(&self.inner.pkgver_tab_cache.borrow());
         new_tp.set_title(&title);
-        pin_workflow_tab(&self.inner.tab_view, &new_tp);
         let mut pages = self.inner.tab_pages.borrow_mut();
         if pages.len() == ProcessTab::COUNT {
             pages[idx] = new_tp;
@@ -233,17 +262,17 @@ impl MainShell {
         };
 
         let new_page = crate::ui::publish::build(self, state);
+        let _allow_close = AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
         self.inner.tab_view.close_page(&old_tp);
         let new_tp = self.inner.tab_view.insert(&new_page, idx as i32);
         new_tp.set_title("Publish");
-        pin_workflow_tab(&self.inner.tab_view, &new_tp);
         let mut pages = self.inner.tab_pages.borrow_mut();
         if pages.len() == ProcessTab::COUNT {
             pages[idx] = new_tp;
         }
     }
 
-    /// Run required validation tier for the Validate tab icon (no log view).
+    /// Run required validation tier for the Validate tab indicator (no log view).
     pub fn spawn_validate_badge_refresh(&self, state: &AppStateRef) {
         let pkg = state.borrow().package.clone();
         let work = state.borrow().config.work_dir.clone();
@@ -330,20 +359,31 @@ impl MainShell {
         *self.inner.periodic_connection_source.borrow_mut() = Some(id);
     }
 
+    /// Status for Connection uses [`adw::TabPage::set_indicator_icon`], not [`adw::TabPage::set_icon`].
+    ///
+    /// A primary [`adw::TabPage::set_icon`] would compete for space with the title; the indicator is
+    /// a small badge beside the label.
     fn apply_connection_tab_icon(&self, ok: Option<bool>) {
         let pages = self.inner.tab_pages.borrow();
         let Some(tp) = pages.get(ProcessTab::Connection as usize) else {
             return;
         };
         match ok {
-            None => tp.set_icon(None::<&gio::ThemedIcon>),
+            None => {
+                tp.set_indicator_icon(None::<&gio::ThemedIcon>);
+                tp.set_indicator_tooltip("");
+            }
             Some(true) => {
                 let icon = gio::ThemedIcon::new("emblem-ok-symbolic");
-                tp.set_icon(Some(&icon));
+                tp.set_indicator_icon(Some(&icon));
+                tp.set_indicator_tooltip("Required tools and AUR SSH look OK");
             }
             Some(false) => {
                 let icon = gio::ThemedIcon::new("window-close-symbolic");
-                tp.set_icon(Some(&icon));
+                tp.set_indicator_icon(Some(&icon));
+                tp.set_indicator_tooltip(
+                    "Something needs attention — open Connection for details and fix hints",
+                );
             }
         }
     }
@@ -354,14 +394,21 @@ impl MainShell {
             return;
         };
         match ok {
-            None => tp.set_icon(None::<&gio::ThemedIcon>),
+            None => {
+                tp.set_indicator_icon(None::<&gio::ThemedIcon>);
+                tp.set_indicator_tooltip("");
+            }
             Some(true) => {
                 let icon = gio::ThemedIcon::new("emblem-ok-symbolic");
-                tp.set_icon(Some(&icon));
+                tp.set_indicator_icon(Some(&icon));
+                tp.set_indicator_tooltip("Required validation tier passed");
             }
             Some(false) => {
                 let icon = gio::ThemedIcon::new("window-close-symbolic");
-                tp.set_icon(Some(&icon));
+                tp.set_indicator_icon(Some(&icon));
+                tp.set_indicator_tooltip(
+                    "Required validation reported issues — open Validate for details",
+                );
             }
         }
     }
@@ -424,6 +471,8 @@ impl MainShell {
         let desired = state.borrow().package.as_ref().map(|p| p.id.clone());
 
         if pages.len() == ProcessTab::COUNT {
+            let _allow_close =
+                AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
             for idx in (2..=6).rev() {
                 tv.close_page(&pages[idx]);
             }
@@ -454,18 +503,11 @@ impl MainShell {
         for (pos, (title, page)) in (2_i32..).zip(mids) {
             let tp = tv.insert(&page, pos);
             tp.set_title(title);
-            pin_workflow_tab(tv, &tp);
             pages.insert(pos as usize, tp);
         }
 
         *self.inner.tabs_package_id.borrow_mut() = desired;
     }
-}
-
-/// Pins a tab so libadwaita does not offer user-driven close controls; programmatic
-/// `TabView::close_page` still removes pages when middle tabs are rebuilt.
-fn pin_workflow_tab(tab_view: &TabView, tab_page: &adw::TabPage) {
-    tab_view.set_page_pinned(tab_page, true);
 }
 
 fn home_tab_title(count: usize) -> String {
