@@ -9,7 +9,7 @@
 [![x86_64](https://img.shields.io/badge/CPU-x86__64-blue.svg)](.)
 [![aarch64](https://img.shields.io/badge/CPU-aarch64-blue.svg)](.)
 
-aur-pkgbuilder is a GTK4/libadwaita desktop application that walks a maintainer through building and publishing an Arch User Repository package end-to-end: sign in with your AUR username and pull the packages you maintain, set up SSH for git, sync a PKGBUILD from its upstream source, run the standard AUR checks, build with `makepkg`, then commit and push to the AUR git remote. Packages are data-driven through an editable registry, so new AUR packages can be added and administered entirely from the GUI.
+aur-pkgbuilder is a GTK4/libadwaita desktop application that walks a maintainer through building and publishing an Arch User Repository package end-to-end: sign in with your AUR username and pull the packages you maintain, set up SSH for git, sync a PKGBUILD from its upstream source, run the standard AUR checks, build with `makepkg`, then commit and push to the AUR git remote. Each package can use its own folder under the working directory for sync and builds (or the default named after the package id). Packages are data-driven through an editable registry, so new AUR packages can be added and administered entirely from the GUI.
 
 ## Community
 
@@ -126,9 +126,9 @@ An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is requ
 | **Guided wizard** | libadwaita `NavigationView` takes you through the flow: onboarding (username → SSH setup) → home → AUR connection → sync → version → validate → build → publish. Each step has clear prerequisites and surfaces errors as toasts. |
 | **AUR login (username)** | Enter your AUR username once; the app queries the public AUR RPC for every package you maintain or co-maintain and imports the ones you pick. No passwords — the RPC is read-only, and the username is just an identifier. |
 | **AUR verification (SSH)** | One-click SSH setup: creates (or reuses) `~/.ssh/aur`, writes the `Host aur.archlinux.org` block into `~/.ssh/config`, and pins the server's host key into `~/.ssh/known_hosts`. Each step is also available on its own. Existing files are never overwritten. |
-| **Editable package registry** | Packages live in `~/.config/aur-pkgbuilder/packages.jsonc` (JSONC — comments allowed). Add, edit, and remove entries from the GUI; nothing about a specific package is hardcoded in source. |
+| **Editable package registry** | Packages live in `~/.config/aur-pkgbuilder/packages.jsonc` (JSONC — comments allowed). Add, edit, and remove entries from the GUI; nothing about a specific package is hardcoded in source. Optional `sync_subdir` sets the relative folder under the working directory for that package’s sync/build tree. |
 | **Preflight checks** | Detects `makepkg`, `git`, `ssh`, and `updpkgsums` on `PATH` and shows install hints for missing ones. A non-interactive `ssh -T aur@aur.archlinux.org` probe confirms your key is accepted by the AUR. Only the Publish step is gated on the probe — sync / version / validate / build run fine without SSH. |
-| **PKGBUILD sync** | Downloads the upstream `PKGBUILD` straight into `<work_dir>/<pkg_id>/PKGBUILD` from the URL defined on each package. |
+| **PKGBUILD sync** | Downloads the upstream `PKGBUILD` into `<work_dir>/…/PKGBUILD` from the URL on each package. By default the folder is `<pkg_id>`; you can set a relative path (e.g. `group/pkg`) on the Sync screen or in the package editor so several packages can share a tree. |
 | **Checksum refresh** | One-click `updpkgsums` with streamed output. Useful for binary/source packages after a version bump; a no-op for git packages with empty `source=`. |
 | **Standard PKGBUILD validation** | Runs the checks an AUR maintainer runs by hand — `bash -n PKGBUILD`, `makepkg --printsrcinfo`, `makepkg --verifysource`, plus optional `shellcheck` and `namcap`. Each check reports pass / warn / fail / skipped with a streaming log. Missing optional tools surface an install hint instead of failing. |
 | **Extended fakeroot validation** | A separate button runs `makepkg -f --noconfirm` (which exercises the full build including the fakeroot-backed `package()` step) and then `namcap -i` on the resulting `.pkg.tar.*`. Catches issues that only show up during real packaging — missing file permissions, wrong deps, empty `package()`, etc. |
@@ -157,7 +157,7 @@ Each screen of the wizard is self-contained and documents what it will run.
 - **One-click setup** — creates or reuses `~/.ssh/aur` (ed25519), adds a `Host aur.archlinux.org` block to `~/.ssh/config`, and pins the server's host keys into `~/.ssh/known_hosts`. Safe to click repeatedly; nothing is overwritten.
 - Individual buttons let you run each step in isolation, copy the public key to the clipboard, or open the AUR account page.
 
-**3. Sync PKGBUILD** — Shows the upstream URL and the destination path, then downloads the PKGBUILD on click.
+**3. Sync PKGBUILD** — Shows the upstream URL and destination path, lets you change the folder (relative to the working directory; blank keeps the package id), save it to the registry, then download the PKGBUILD on click.
 
 **4. Version and checksums** — Kind-specific guidance (binary vs git vs source) plus a generic **Run updpkgsums** button with its own streaming log.
 
@@ -211,13 +211,14 @@ All state lives under `~/.config/aur-pkgbuilder/` as **JSONC** (JSON with Commen
       "subtitle": "Short description shown on the home card.",
       "kind": "bin", // "bin" | "git" | "other"
       "pkgbuild_url": "https://example.com/raw/PKGBUILD-bin",
-      "icon_name": null
+      "icon_name": null,
+      "sync_subdir": null // optional relative folder under work_dir; null = use id
     }
   ]
 }
 ```
 
-Build artefacts live under `<work_dir>/<pkg_id>/` and AUR clones under `<work_dir>/aur/<pkg_id>/`. The default `<work_dir>` is `$XDG_CACHE_HOME/aur-pkgbuilder/builds`.
+Build and sync artefacts live under `<work_dir>/<folder>/`, where `<folder>` is the package id unless `sync_subdir` is set to a safe relative path. AUR git clones stay under `<work_dir>/aur/<pkg_id>/`. The default `<work_dir>` is `$XDG_CACHE_HOME/aur-pkgbuilder/builds`.
 
 Both files are safe to hand-edit — comments outside the JSON object block persist across saves, but comments placed inside the JSON body are overwritten the next time the GUI saves.
 

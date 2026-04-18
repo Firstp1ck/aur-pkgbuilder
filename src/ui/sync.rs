@@ -1,15 +1,33 @@
 use std::path::PathBuf;
 
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::shell::{MainShell, ProcessTab};
+use crate::workflow::package::PackageDef;
 use crate::workflow::sync as sync_wf;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+fn pkgbuild_path(work: &std::path::Path, pkg: &PackageDef) -> PathBuf {
+    sync_wf::package_dir(work, pkg).join("PKGBUILD")
+}
+
+fn set_target_subtitle(
+    target_row: &ActionRow,
+    work: &Option<std::path::PathBuf>,
+    pkg: &PackageDef,
+) {
+    let subtitle = work
+        .as_ref()
+        .map(|w| pkgbuild_path(w, pkg).display().to_string())
+        .unwrap_or_else(|| "(no working directory set)".into());
+    target_row.set_subtitle(&subtitle);
+}
+
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
     let toasts = ToastOverlay::new();
@@ -29,7 +47,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(format!(
-            "Download the PKGBUILD for {} from its configured source into your working directory.",
+            "Download the PKGBUILD for {} from its configured source into the folder below.",
             pkg.id
         ))
         .halign(Align::Start)
@@ -47,15 +65,29 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .build();
     group.add(&src_row);
 
-    let target_row = ActionRow::builder().title("Destination").build();
-    let target_value = {
-        let cfg = &state.borrow().config;
-        cfg.work_dir
-            .clone()
-            .map(|w| sync_wf::package_dir(&w, &pkg.id).join("PKGBUILD"))
-            .unwrap_or_else(|| PathBuf::from("(no working directory set)"))
-    };
-    target_row.set_subtitle(&target_value.to_string_lossy());
+    let work = state.borrow().config.work_dir.clone();
+
+    let folder_row = EntryRow::builder()
+        .title("Folder — relative to working dir (blank = package id; e.g. my-group/pkg)")
+        .build();
+    folder_row.set_text(pkg.sync_subdir.as_deref().unwrap_or(""));
+
+    let save_folder_btn = Button::builder()
+        .label("Save folder")
+        .valign(Align::Center)
+        .css_classes(vec!["pill"])
+        .build();
+    let folder_actions = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .halign(Align::End)
+        .build();
+    folder_actions.append(&save_folder_btn);
+    folder_row.add_suffix(&folder_actions);
+    group.add(&folder_row);
+
+    let target_row = ActionRow::builder().title("Destination (PKGBUILD)").build();
+    set_target_subtitle(&target_row, &work, &pkg);
     group.add(&target_row);
     content.append(&group);
 
@@ -85,17 +117,63 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
 
     {
         let state = state.clone();
+        let folder_row = folder_row.clone();
+        let target_row = target_row.clone();
+        let toasts = toasts.clone();
+        save_folder_btn.connect_clicked(move |_| {
+            let raw = folder_row.text().to_string();
+            if sync_wf::validate_sync_subdir(&raw).is_err() {
+                folder_row.add_css_class("error");
+                toasts.add_toast(Toast::new(
+                    "Invalid folder: use a relative path under the working directory (no ..).",
+                ));
+                return;
+            }
+            folder_row.remove_css_class("error");
+            let sync_subdir = {
+                let t = raw.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
+            };
+            let mut updated = {
+                let st = state.borrow();
+                st.package().clone()
+            };
+            updated.sync_subdir = sync_subdir;
+            {
+                let mut st = state.borrow_mut();
+                st.registry.upsert(updated.clone());
+                if let Some(ref mut p) = st.package
+                    && p.id == updated.id
+                {
+                    *p = updated.clone();
+                }
+                if let Err(e) = st.registry.save() {
+                    toasts.add_toast(Toast::new(&format!("Could not save registry: {e}")));
+                    return;
+                }
+            }
+            set_target_subtitle(&target_row, &state.borrow().config.work_dir, &updated);
+            toasts.add_toast(Toast::new("Destination folder saved"));
+        });
+    }
+
+    {
+        let state = state.clone();
         let status = status.clone();
         let spinner = spinner.clone();
         let download_btn_inner = download_btn.clone();
         let continue_btn = continue_btn.clone();
         let toasts = toasts.clone();
-        let pkg_cb = pkg.clone();
         download_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("Set a working directory first."));
                 return;
             };
+            let pkg = state.borrow().package().clone();
             spinner.start();
             status.set_text("downloading…");
             download_btn_inner.set_sensitive(false);
@@ -106,11 +184,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
             let download_btn_inner = download_btn_inner.clone();
             let continue_btn = continue_btn.clone();
             let toasts = toasts.clone();
-            let id = pkg_cb.id.clone();
-            let url = pkg_cb.pkgbuild_url.clone();
+            let url = pkg.pkgbuild_url.clone();
             runtime::spawn(
                 async move {
-                    sync_wf::download_pkgbuild(&work, &id, &url)
+                    sync_wf::download_pkgbuild(&work, &pkg, &url)
                         .await
                         .map_err(|e| e.to_string())
                 },
@@ -135,11 +212,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     }
 
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         continue_btn.connect_clicked(move |_| {
-            let page = ui::version::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Version);
         });
     }
 

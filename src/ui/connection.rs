@@ -1,15 +1,84 @@
 use std::path::PathBuf;
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup};
+use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup};
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::preflight::{self, SshProbe, ToolCheck};
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+/// Whether we should probe AUR SSH immediately on opening this page: the user
+/// has configured a key in the app, or the conventional `~/.ssh/aur` key exists.
+fn ssh_likely_configured(state: &AppStateRef) -> bool {
+    if state.borrow().config.ssh_key.is_some() {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    home.join(".ssh").join("aur").is_file()
+}
+
+/// Runs [`preflight::probe_aur_ssh`] and updates `state.ssh_ok` plus the probe row UI.
+fn run_aur_ssh_probe(
+    state: &AppStateRef,
+    probe_status: &Label,
+    probe_spinner: &Spinner,
+    probe_btn: &Button,
+) {
+    save_config(state);
+    probe_spinner.start();
+    probe_status.set_text("probing…");
+    probe_btn.set_sensitive(false);
+    let key = state.borrow().config.ssh_key.clone();
+    let state2 = state.clone();
+    let probe_status = probe_status.clone();
+    let probe_spinner = probe_spinner.clone();
+    let probe_btn2 = probe_btn.clone();
+    runtime::spawn(
+        async move {
+            match preflight::probe_aur_ssh(key.as_deref()).await {
+                Ok(probe) => Ok(probe),
+                Err(e) => Err(e.to_string()),
+            }
+        },
+        move |result| {
+            probe_spinner.stop();
+            probe_btn2.set_sensitive(true);
+            match result {
+                Ok(SshProbe::Authenticated { banner }) => {
+                    state2.borrow_mut().ssh_ok = true;
+                    probe_status.set_text("connected");
+                    probe_status.set_tooltip_text(Some(&banner));
+                    probe_status.set_css_classes(&["success"]);
+                }
+                Ok(SshProbe::KeyRejected { banner }) => {
+                    state2.borrow_mut().ssh_ok = false;
+                    probe_status.set_text("key rejected");
+                    probe_status.set_tooltip_text(Some(&banner));
+                    probe_status.set_css_classes(&["error"]);
+                }
+                Ok(SshProbe::Failed { stderr, exit_code }) => {
+                    state2.borrow_mut().ssh_ok = false;
+                    probe_status.set_text(&format!("failed (exit {exit_code})"));
+                    probe_status.set_tooltip_text(Some(&stderr));
+                    probe_status.set_css_classes(&["error"]);
+                }
+                Err(msg) => {
+                    state2.borrow_mut().ssh_ok = false;
+                    probe_status.set_text("error");
+                    probe_status.set_tooltip_text(Some(&msg));
+                    probe_status.set_css_classes(&["error"]);
+                }
+            }
+        },
+    );
+}
+
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(18)
@@ -41,7 +110,9 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     // --- Tools group ---
     let tools_group = PreferencesGroup::builder()
         .title("Required tools")
-        .description("These must be on PATH. Missing ones can be installed from the official repos.")
+        .description(
+            "These must be on PATH. Missing ones can be installed from the official repos.",
+        )
         .build();
     content.append(&tools_group);
 
@@ -79,7 +150,9 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let cfg = &state.borrow().config;
         cfg.ssh_key.clone().unwrap_or_default()
     };
-    let ssh_row = EntryRow::builder().title("SSH key (optional override)").build();
+    let ssh_row = EntryRow::builder()
+        .title("SSH key (optional override)")
+        .build();
     ssh_row.set_text(&sshkey.to_string_lossy());
     let state_ssh = state.clone();
     ssh_row.connect_changed(move |row| {
@@ -111,10 +184,11 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     setup_row.add_suffix(&setup_btn);
     probe_group.add(&setup_row);
     {
-        let nav = nav.clone();
+        let nav = shell.nav();
         let state = state.clone();
         setup_btn.connect_clicked(move |_| {
-            let page = ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromConnection);
+            let page =
+                ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromConnection);
             nav.push(&page);
         });
     }
@@ -154,63 +228,20 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let probe_spinner = probe_spinner.clone();
         let probe_btn_inner = probe_btn.clone();
         probe_btn.connect_clicked(move |_| {
-            save_config(&state);
-            probe_spinner.start();
-            probe_status.set_text("probing…");
-            probe_btn_inner.set_sensitive(false);
-            let key = state.borrow().config.ssh_key.clone();
-            let state2 = state.clone();
-            let probe_status = probe_status.clone();
-            let probe_spinner = probe_spinner.clone();
-            let probe_btn_inner2 = probe_btn_inner.clone();
-            runtime::spawn(
-                async move {
-                    match preflight::probe_aur_ssh(key.as_deref()).await {
-                        Ok(probe) => Ok(probe),
-                        Err(e) => Err(e.to_string()),
-                    }
-                },
-                move |result| {
-                    probe_spinner.stop();
-                    probe_btn_inner2.set_sensitive(true);
-                    match result {
-                        Ok(SshProbe::Authenticated { banner }) => {
-                            state2.borrow_mut().ssh_ok = true;
-                            probe_status.set_text("connected");
-                            probe_status.set_tooltip_text(Some(&banner));
-                            probe_status.set_css_classes(&["success"]);
-                        }
-                        Ok(SshProbe::KeyRejected { banner }) => {
-                            state2.borrow_mut().ssh_ok = false;
-                            probe_status.set_text("key rejected");
-                            probe_status.set_tooltip_text(Some(&banner));
-                            probe_status.set_css_classes(&["error"]);
-                        }
-                        Ok(SshProbe::Failed { stderr, exit_code }) => {
-                            state2.borrow_mut().ssh_ok = false;
-                            probe_status.set_text(&format!("failed (exit {exit_code})"));
-                            probe_status.set_tooltip_text(Some(&stderr));
-                            probe_status.set_css_classes(&["error"]);
-                        }
-                        Err(msg) => {
-                            state2.borrow_mut().ssh_ok = false;
-                            probe_status.set_text("error");
-                            probe_status.set_tooltip_text(Some(&msg));
-                            probe_status.set_css_classes(&["error"]);
-                        }
-                    }
-                },
-            );
+            run_aur_ssh_probe(&state, &probe_status, &probe_spinner, &probe_btn_inner);
         });
     }
 
+    if ssh_likely_configured(state) {
+        run_aur_ssh_probe(state, &probe_status, &probe_spinner, &probe_btn);
+    }
+
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         continue_btn.connect_clicked(move |_| {
             save_config(&state);
-            let page = ui::sync::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Sync);
         });
     }
     content.append(&continue_btn);

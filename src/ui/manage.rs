@@ -7,10 +7,7 @@
 //! friendly "coming soon" toast instead of crashing.
 
 use adw::prelude::*;
-use adw::{
-    ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
-    Window,
-};
+use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay, Window};
 use gtk4::{
     Align, Box as GtkBox, Button, HeaderBar, Image, Label, ListBox, MenuButton, Orientation,
     Popover,
@@ -19,10 +16,11 @@ use gtk4::{
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::admin::{self, AdminError, UpdateStatus};
 use crate::workflow::package::PackageDef;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -53,8 +51,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     content.append(&global_actions_group(state, &toasts));
-    content.append(&ssh_commands_group(nav, state));
-    content.append(&packages_group(nav, state, &toasts));
+    content.append(&ssh_commands_group(shell, state));
+    content.append(&packages_group(shell, state, &toasts));
 
     toasts.set_child(Some(&content));
     ui::home::wrap_page("Manage packages", &toasts)
@@ -76,7 +74,7 @@ fn global_actions_group(state: &AppStateRef, toasts: &ToastOverlay) -> Preferenc
     group
 }
 
-fn ssh_commands_group(nav: &NavigationView, state: &AppStateRef) -> PreferencesGroup {
+fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> PreferencesGroup {
     let group = PreferencesGroup::builder()
         .title("AUR SSH commands")
         .description(
@@ -92,7 +90,7 @@ fn ssh_commands_group(nav: &NavigationView, state: &AppStateRef) -> PreferencesG
     row.add_suffix(&btn);
     group.add(&row);
 
-    let nav = nav.clone();
+    let nav = shell.nav();
     let state = state.clone();
     btn.connect_clicked(move |_| {
         let page = ui::aur_ssh::build(&nav, &state);
@@ -211,10 +209,12 @@ fn check_all_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
                         Ok(UpdateStatus::Unknown) => {
                             toasts_outer.add_toast(Toast::new(&format!("{id}: version unknown")));
                         }
-                        Err(AdminError::NotImplemented(what)) => toasts_outer
-                            .add_toast(Toast::new(&format!("Coming soon: {what}"))),
-                        Err(e) => toasts_outer
-                            .add_toast(Toast::new(&format!("{id}: failed ({e})"))),
+                        Err(AdminError::NotImplemented(what)) => {
+                            toasts_outer.add_toast(Toast::new(&format!("Coming soon: {what}")))
+                        }
+                        Err(e) => {
+                            toasts_outer.add_toast(Toast::new(&format!("{id}: failed ({e})")))
+                        }
                     }
                 }
             },
@@ -228,7 +228,7 @@ fn check_all_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
 // ---------------------------------------------------------------------------
 
 fn packages_group(
-    nav: &NavigationView,
+    shell: &MainShell,
     state: &AppStateRef,
     toasts: &ToastOverlay,
 ) -> PreferencesGroup {
@@ -248,13 +248,13 @@ fn packages_group(
     }
 
     for pkg in packages {
-        group.add(&package_admin_row(nav, state, toasts, &pkg));
+        group.add(&package_admin_row(shell, state, toasts, &pkg));
     }
     group
 }
 
 fn package_admin_row(
-    nav: &NavigationView,
+    shell: &MainShell,
     state: &AppStateRef,
     toasts: &ToastOverlay,
     pkg: &PackageDef,
@@ -267,13 +267,13 @@ fn package_admin_row(
     icon.set_pixel_size(24);
     row.add_prefix(&icon);
 
-    let menu = build_row_menu(nav, state, toasts, pkg);
+    let menu = build_row_menu(shell, state, toasts, pkg);
     row.add_suffix(&menu);
     row
 }
 
 fn build_row_menu(
-    nav: &NavigationView,
+    shell: &MainShell,
     state: &AppStateRef,
     toasts: &ToastOverlay,
     pkg: &PackageDef,
@@ -304,20 +304,22 @@ fn build_row_menu(
     // Open wizard: same path as home row activation.
     {
         let pkg = pkg.clone();
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         let popover = popover.clone();
         open_wizard.connect_clicked(move |_| {
             popover.popdown();
             state.borrow_mut().package = Some(pkg.clone());
-            let page = ui::connection::build(&nav, &state);
-            nav.push(&page);
+            state.borrow_mut().config.last_package = Some(pkg.id.clone());
+            let _ = state.borrow().config.save();
+            shell.refresh_tabs_for_package(&state);
+            shell.goto_tab(&state, ProcessTab::Connection);
         });
     }
 
     // Open working directory via xdg-open (functional).
     {
-        let pkg_id = pkg.id.clone();
+        let pkg = pkg.clone();
         let state = state.clone();
         let toasts = toasts.clone();
         let popover = popover.clone();
@@ -328,9 +330,9 @@ fn build_row_menu(
                 return;
             };
             let toasts = toasts.clone();
-            let pkg_id = pkg_id.clone();
+            let pkg = pkg.clone();
             runtime::spawn(
-                async move { admin::open_work_dir(&work, &pkg_id).await },
+                async move { admin::open_work_dir(&work, &pkg).await },
                 move |res| render_admin_result(&toasts, res.map(|_| ()), "Opened"),
             );
         });
@@ -353,10 +355,12 @@ fn build_row_menu(
             runtime::spawn(
                 async move { admin::check_upstream(&work, &pkg).await },
                 move |res| match res {
-                    Ok(UpdateStatus::UpToDate { version }) => toasts
-                        .add_toast(Toast::new(&format!("Up to date: {version}"))),
-                    Ok(UpdateStatus::Outdated { local, upstream }) => toasts
-                        .add_toast(Toast::new(&format!("{local} → {upstream}"))),
+                    Ok(UpdateStatus::UpToDate { version }) => {
+                        toasts.add_toast(Toast::new(&format!("Up to date: {version}")))
+                    }
+                    Ok(UpdateStatus::Outdated { local, upstream }) => {
+                        toasts.add_toast(Toast::new(&format!("{local} → {upstream}")))
+                    }
                     Ok(UpdateStatus::Unknown) => {
                         toasts.add_toast(Toast::new("Version unknown"));
                     }
@@ -434,6 +438,8 @@ fn prompt_pkg_name(
     let window = Window::builder()
         .modal(true)
         .default_width(420)
+        .width_request(400)
+        .height_request(280)
         .title(title)
         .build();
     if let Some(parent) = parent {

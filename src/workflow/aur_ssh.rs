@@ -152,9 +152,9 @@ impl AurSshCommand {
             | AurSshCommand::Unnotify
             | AurSshCommand::SetComaintainers
             | AurSshCommand::SetKeywords => Severity::Writes,
-            AurSshCommand::Adopt
-            | AurSshCommand::Disown
-            | AurSshCommand::SetupRepo => Severity::Destructive,
+            AurSshCommand::Adopt | AurSshCommand::Disown | AurSshCommand::SetupRepo => {
+                Severity::Destructive
+            }
         }
     }
 
@@ -268,8 +268,6 @@ pub async fn run(
     let status = child.wait().await.map_err(|e| format!("wait: {e}"))?;
     let _ = out_task.await;
     let _ = err_task.await;
-    let _ = events
-        .send(LogLine::Info(format!("exit: {status}")))
-        .await;
+    let _ = events.send(LogLine::Info(format!("exit: {status}"))).await;
     Ok(status)
 }

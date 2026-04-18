@@ -1,15 +1,16 @@
 use adw::prelude::*;
-use adw::{NavigationPage, NavigationView, Toast, ToastOverlay};
+use adw::{NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::log_view::LogView;
+use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::build as build_wf;
 use crate::workflow::sync;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
     let toasts = ToastOverlay::new();
@@ -40,8 +41,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .orientation(Orientation::Horizontal)
         .spacing(16)
         .build();
-    let nobuild = CheckButton::with_label("--nobuild (prepare only)");
-    let clean = CheckButton::with_label("--clean");
+    let nobuild = CheckButton::with_label("Prepare only (--nobuild)");
+    let clean = CheckButton::with_label("Clean build tree after success (--clean)");
     options_row.append(&nobuild);
     options_row.append(&clean);
     content.append(&options_row);
@@ -83,7 +84,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         let nobuild = nobuild.clone();
         let clean = clean.clone();
-        let id = pkg.id.clone();
+        let pkg = pkg.clone();
         build_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("No working directory configured."));
@@ -93,7 +94,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                 toasts.add_toast(Toast::new("Refusing to build as root."));
                 return;
             }
-            let dir = sync::package_dir(&work, &id);
+            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             status.set_text("building…");
             spinner.start();
@@ -147,11 +148,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     }
 
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         continue_btn.connect_clicked(move |_| {
-            let page = ui::publish::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Publish);
         });
     }
 

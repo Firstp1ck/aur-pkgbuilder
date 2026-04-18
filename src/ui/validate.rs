@@ -10,13 +10,15 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::log_view::LogView;
+use crate::ui::shell::{MainShell, ProcessTab};
+use crate::workflow::package::PackageDef;
 use crate::workflow::sync;
 use crate::workflow::validate::{self, CheckId, CheckOutcome, CheckReport, CheckTier};
 
@@ -30,7 +32,46 @@ struct RowHandles {
 
 type RowMap = Rc<RefCell<HashMap<CheckId, RowHandles>>>;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+/// Runs bash / `.SRCINFO` / `verifysource` checks in the background. No-op when
+/// `work_dir` is unset (same as manual actions).
+fn spawn_required_tier_streaming(
+    state: &AppStateRef,
+    rows: &RowMap,
+    log: &LogView,
+    toasts: &ToastOverlay,
+    summary_status: &Label,
+    pkg: &PackageDef,
+) {
+    let Some(work) = state.borrow().config.work_dir.clone() else {
+        return;
+    };
+    let pkg = pkg.clone();
+    let dir = sync::package_dir(&work, &pkg);
+    summary_status.set_text("running required checks…");
+    mark_tier_running(rows, CheckTier::Required);
+
+    let rows_done = rows.clone();
+    let log_cb = log.clone();
+    let summary_status = summary_status.clone();
+    let toasts = toasts.clone();
+    runtime::spawn_streaming(
+        move |tx| async move { validate::run_tier(CheckTier::Required, &dir, &tx).await },
+        move |line| log_cb.append(&line),
+        move |reports| {
+            for rep in &reports {
+                apply_report(&rows_done, rep);
+            }
+            summary_status.set_text(&summarize(&reports));
+            if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
+                toasts.add_toast(Toast::new("Some required checks failed"));
+            } else {
+                toasts.add_toast(Toast::new("Required checks complete"));
+            }
+        },
+    );
+}
+
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
     let toasts = ToastOverlay::new();
@@ -50,9 +91,9 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(
-            "Run the standard PKGBUILD checks before building. Failures in required \
-             checks will very likely also fail the build; warnings from lints are \
-             informational.",
+            "Required checks run automatically when you open this page (when a working \
+             directory is set). Use “Run all checks” to include optional lints. Failures \
+             in required checks will very likely also fail the build.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -83,7 +124,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .build();
 
     for id in CheckId::ALL {
-        let (row, handles) = render_check_row(id, state, &log, &rows);
+        let (row, handles) = render_check_row(id, state, &pkg, &log, &rows);
         rows.borrow_mut().insert(id, handles);
         match id.tier() {
             CheckTier::Required => required.add(&row),
@@ -135,13 +176,13 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let log = log.clone();
         let toasts = toasts.clone();
         let summary_status = summary_status.clone();
-        let pkg_id = pkg.id.clone();
+        let pkg = pkg.clone();
         run_all_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("No working directory configured."));
                 return;
             };
-            let dir = sync::package_dir(&work, &pkg_id);
+            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             summary_status.set_text("running fast checks…");
             mark_tier_running(&rows, CheckTier::Required);
@@ -169,6 +210,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         });
     }
 
+    spawn_required_tier_streaming(state, &rows, &log, &toasts, &summary_status, &pkg);
+
     // --- Run extended (fakeroot build + package lint) ---
     {
         let state = state.clone();
@@ -176,14 +219,14 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let log = log.clone();
         let toasts = toasts.clone();
         let summary_status = summary_status.clone();
-        let pkg_id = pkg.id.clone();
+        let pkg = pkg.clone();
         let run_extended_inner = run_extended_btn.clone();
         run_extended_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("No working directory configured."));
                 return;
             };
-            let dir = sync::package_dir(&work, &pkg_id);
+            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             summary_status.set_text("running extended checks — this may take a while…");
             mark_tier_running(&rows, CheckTier::Extended);
@@ -214,11 +257,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     }
 
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         continue_btn.connect_clicked(move |_| {
-            let page = ui::build::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Build);
         });
     }
 
@@ -233,12 +275,15 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
 fn render_check_row(
     id: CheckId,
     state: &AppStateRef,
+    pkg: &PackageDef,
     log: &LogView,
     rows: &RowMap,
 ) -> (ActionRow, RowHandles) {
     let row = ActionRow::builder()
         .title(id.title())
         .subtitle(id.description())
+        // Descriptions include shell placeholders like `<pkg>.pkg.tar.*`; treat as plain text.
+        .use_markup(false)
         .build();
 
     let status_icon = Image::from_icon_name("media-playback-start-symbolic");
@@ -264,15 +309,12 @@ fn render_check_row(
         let state = state.clone();
         let rows = rows.clone();
         let log = log.clone();
+        let pkg = pkg.clone();
         run_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 return;
             };
-            let pkg_id = match state.borrow().package.as_ref() {
-                Some(p) => p.id.clone(),
-                None => return,
-            };
-            let dir = sync::package_dir(&work, &pkg_id);
+            let dir = sync::package_dir(&work, &pkg);
             mark_running(&rows, id);
             let rows_done = rows.clone();
             let log_cb = log.clone();
@@ -297,7 +339,8 @@ fn mark_running(rows: &RowMap, id: CheckId) {
     if let Some(h) = rows.borrow().get(&id) {
         h.spinner.start();
         h.run_btn.set_sensitive(false);
-        h.status_icon.set_icon_name(Some("content-loading-symbolic"));
+        h.status_icon
+            .set_icon_name(Some("content-loading-symbolic"));
         set_status_classes(&h.status_icon, &["dim-label"]);
         h.summary.set_text("running…");
     }

@@ -52,6 +52,11 @@ pub struct PackageDef {
     /// Optional freedesktop icon name override.
     #[serde(default)]
     pub icon_name: Option<String>,
+    /// Directory under [`crate::config::Config::work_dir`] where this package’s
+    /// PKGBUILD and build tree live. Must be a safe relative path (no `..`).
+    /// Empty / missing means `<work_dir>/<id>/` (same as `id`).
+    #[serde(default)]
+    pub sync_subdir: Option<String>,
 }
 
 impl PackageDef {

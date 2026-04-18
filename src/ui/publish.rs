@@ -1,8 +1,5 @@
 use adw::prelude::*;
-use adw::{
-    ActionRow, Banner, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast,
-    ToastOverlay,
-};
+use adw::{ActionRow, Banner, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{
     Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, Spinner,
     TextView, WrapMode,
@@ -13,11 +10,12 @@ use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::log_view::LogView;
+use crate::ui::shell::MainShell;
 use crate::workflow::aur_git;
 use crate::workflow::build as build_wf;
 use crate::workflow::sync;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
     let toasts = ToastOverlay::new();
@@ -61,7 +59,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
             .button_label("Set up SSH")
             .revealed(true)
             .build();
-        let nav_cb = nav.clone();
+        let nav_cb = shell.nav();
         let state_cb = state.clone();
         banner.connect_button_clicked(move |_| {
             let page = ui::ssh_setup::build(
@@ -172,7 +170,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .label("Commit and push")
         .sensitive(false)
         .tooltip_text(if ssh_ready {
-            "Commits the staged files and pushes to the AUR."
+            "Runs after Prepare: commits PKGBUILD + .SRCINFO and pushes to the AUR. \
+             Enabled only when the clone differs from HEAD."
         } else {
             "Set up and verify SSH first."
         })
@@ -224,14 +223,14 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let log = log.clone();
         let diff_buffer = diff_buffer.clone();
         let toasts = toasts.clone();
-        let id = pkg.id.clone();
+        let pkg_st = pkg.clone();
         let ssh_url = pkg.aur_ssh_url();
         stage_btn.connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("No working directory configured."));
                 return;
             };
-            let build_dir = sync::package_dir(&work, &id);
+            let build_dir = sync::package_dir(&work, &pkg_st);
             spinner.start();
             stage_btn_inner.set_sensitive(false);
             log.clear();
@@ -242,7 +241,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
             let log_cb = log.clone();
             let diff_buffer = diff_buffer.clone();
             let toasts = toasts.clone();
-            let id = id.clone();
+            let id = pkg_st.id.clone();
             let ssh_url = ssh_url.clone();
             runtime::spawn_streaming(
                 move |tx| async move {
@@ -255,20 +254,27 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                     aur_git::stage_files(&build_dir, &clone_dir)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let diff = aur_git::diff(&clone_dir)
+                    let diff = aur_git::diff(&clone_dir).await.map_err(|e| e.to_string())?;
+                    let has_changes = aur_git::has_changes_vs_head(&clone_dir)
                         .await
                         .map_err(|e| e.to_string())?;
-                    Ok::<_, String>(diff)
+                    Ok::<_, String>((diff, has_changes))
                 },
                 move |line| log_cb.append(&line),
                 move |res| {
                     spinner_done.stop();
                     stage_btn_done.set_sensitive(true);
                     match res {
-                        Ok(diff) => {
+                        Ok((diff, has_changes)) => {
                             diff_buffer.set_text(&diff);
-                            push_btn.set_sensitive(true);
-                            toasts.add_toast(Toast::new("Ready to push"));
+                            push_btn.set_sensitive(has_changes);
+                            if has_changes {
+                                toasts.add_toast(Toast::new("Ready to push — review the diff"));
+                            } else {
+                                toasts.add_toast(Toast::new(
+                                    "No changes vs AUR — nothing to commit or push",
+                                ));
+                            }
                         }
                         Err(e) => {
                             toasts.add_toast(Toast::new(&format!("Failed: {e}")));
@@ -315,16 +321,22 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                 move |line| log_cb.append(&line),
                 move |res| {
                     spinner_done.stop();
-                    push_btn_done.set_sensitive(true);
                     match res {
-                        Ok(()) => toasts.add_toast(Toast::new("Pushed to AUR")),
-                        Err(e) => toasts.add_toast(Toast::new(&format!("Push failed: {e}"))),
+                        Ok(()) => {
+                            push_btn_done.set_sensitive(false);
+                            toasts.add_toast(Toast::new(
+                                "Pushed to AUR — run Prepare again after new edits",
+                            ));
+                        }
+                        Err(e) => {
+                            push_btn_done.set_sensitive(true);
+                            toasts.add_toast(Toast::new(&format!("Push failed: {e}")));
+                        }
                     }
                 },
             );
         });
     }
-    let _ = nav;
 
     toasts.set_child(Some(&content));
     ui::home::wrap_page("Publish", &toasts)

@@ -1,16 +1,17 @@
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::log_view::LogView;
+use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::build as build_wf;
 use crate::workflow::package::{PackageDef, PackageKind};
 use crate::workflow::sync;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
     let toasts = ToastOverlay::new();
@@ -31,6 +32,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
 
     content.append(&kind_hint(&pkg));
+    content.append(&ui::pkgbuild_editor::build_section(state, &pkg, &toasts));
     content.append(&checksum_group(state, &pkg, &toasts));
 
     let continue_btn = Button::builder()
@@ -39,11 +41,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["pill", "suggested-action"])
         .build();
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         continue_btn.connect_clicked(move |_| {
-            let page = ui::validate::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Validate);
         });
     }
     content.append(&continue_btn);
@@ -79,7 +80,11 @@ fn kind_hint(pkg: &PackageDef) -> PreferencesGroup {
 
 /// Generic "refresh sha256sums" runner — useful for every kind of package,
 /// so it is shown unconditionally.
-fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) -> PreferencesGroup {
+fn checksum_group(
+    state: &AppStateRef,
+    pkg: &PackageDef,
+    toasts: &ToastOverlay,
+) -> PreferencesGroup {
     let group = PreferencesGroup::builder()
         .title("Checksums")
         .description("Runs `updpkgsums` against the PKGBUILD in the working directory.")
@@ -111,13 +116,13 @@ fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) 
     let state = state.clone();
     let spinner_c = spinner.clone();
     let run_btn_c = run_btn.clone();
-    let id = pkg.id.clone();
+    let pkg = pkg.clone();
     run_btn.connect_clicked(move |_| {
         let Some(work) = state.borrow().config.work_dir.clone() else {
             toasts.add_toast(Toast::new("No working directory configured."));
             return;
         };
-        let dir = sync::package_dir(&work, &id);
+        let dir = sync::package_dir(&work, &pkg);
         spinner_c.start();
         run_btn_c.set_sensitive(false);
         log.clear();
@@ -138,11 +143,17 @@ fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) 
                 spinner_done.stop();
                 run_btn_done.set_sensitive(true);
                 match res {
-                    Ok(status) if status.success() => {
-                        toasts.add_toast(Toast::new("Checksums refreshed"));
+                    Ok(report) if report.status.success() && report.pkgbuild_changed => {
+                        toasts.add_toast(Toast::new("Checksums updated in PKGBUILD"));
                     }
-                    Ok(status) => {
-                        toasts.add_toast(Toast::new(&format!("updpkgsums exited {status}")));
+                    Ok(report) if report.status.success() => {
+                        toasts.add_toast(Toast::new(
+                            "Checksums already matched — PKGBUILD left unchanged",
+                        ));
+                    }
+                    Ok(report) => {
+                        toasts
+                            .add_toast(Toast::new(&format!("updpkgsums exited {}", report.status)));
                     }
                     Err(e) => {
                         toasts.add_toast(Toast::new(&format!("Error: {e}")));

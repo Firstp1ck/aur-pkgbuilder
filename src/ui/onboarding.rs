@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
+use adw::{
+    ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
+};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -80,17 +82,28 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     account_group.add(&fetch_row);
     content.append(&account_group);
 
-    // --- Results group (populated after fetch) ---
-    let results_group = PreferencesGroup::builder()
-        .title("Your packages")
-        .description("Tick the packages you want to administer from here.")
+    // --- Results list (populated after fetch; ListBox, not PreferencesGroup, so we can clear rows safely.)
+    let results_title = Label::builder()
+        .label("Your packages")
+        .halign(Align::Start)
+        .css_classes(vec!["title-4"])
         .build();
+    let results_desc = Label::builder()
+        .label("Tick the packages you want to administer from here.")
+        .halign(Align::Start)
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(vec!["dim-label"])
+        .build();
+    content.append(&results_title);
+    content.append(&results_desc);
+    let results_list = ui::boxed_list_box();
     let empty_row = ActionRow::builder()
         .title("Nothing fetched yet")
         .subtitle("Enter your username above and press Fetch.")
         .build();
-    results_group.add(&empty_row);
-    content.append(&results_group);
+    results_list.append(&empty_row);
+    content.append(&results_list);
 
     let selections: SelectionMap = Rc::new(RefCell::new(HashMap::new()));
 
@@ -121,7 +134,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         let username_row = username_row.clone();
         let fetch_spinner = fetch_spinner.clone();
         let fetch_btn_inner = fetch_btn.clone();
-        let results_group = results_group.clone();
+        let results_list = results_list.clone();
         let selections = selections.clone();
         let import_btn = import_btn.clone();
         fetch_btn.connect_clicked(move |_| {
@@ -135,13 +148,13 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
 
             fetch_spinner.start();
             fetch_btn_inner.set_sensitive(false);
-            clear_group(&results_group);
+            ui::clear_boxed_list(&results_list);
             selections.borrow_mut().clear();
             import_btn.set_sensitive(false);
 
             let fetch_spinner = fetch_spinner.clone();
             let fetch_btn_inner = fetch_btn_inner.clone();
-            let results_group = results_group.clone();
+            let results_list = results_list.clone();
             let selections = selections.clone();
             let import_btn = import_btn.clone();
             let toasts = toasts.clone();
@@ -158,7 +171,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                                     "Double-check your username, or register a package on the AUR first.",
                                 )
                                 .build();
-                            results_group.add(&row);
+                            results_list.append(&row);
                             toasts.add_toast(Toast::new("No packages found for this user"));
                         }
                         Ok(packages) => {
@@ -169,7 +182,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                             for pkg in packages {
                                 let row =
                                     render_package_row(&pkg, &selections, &import_btn);
-                                results_group.add(&row);
+                                results_list.append(&row);
                             }
                         }
                         Err(AurAccountError::Rpc(msg)) => {
@@ -218,11 +231,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                 let _ = st.registry.save();
             }
             toasts.add_toast(Toast::new(&format!("Imported {count} package(s)")));
-            let page = ui::ssh_setup::build(
-                &nav,
-                &state,
-                ui::ssh_setup::SshSetupFlavor::FromOnboarding,
-            );
+            let page =
+                ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromOnboarding);
             nav.push(&page);
         });
     }
@@ -300,26 +310,12 @@ fn render_package_row(
         let selections = selections.clone();
         let import_btn = import_btn.clone();
         check.connect_toggled(move |_| {
-            let any = selections
-                .borrow()
-                .values()
-                .any(|(_, cb)| cb.is_active());
+            let any = selections.borrow().values().any(|(_, cb)| cb.is_active());
             import_btn.set_sensitive(any);
         });
     }
     // Seed initial button state for auto-checked rows.
-    import_btn.set_sensitive(
-        selections
-            .borrow()
-            .values()
-            .any(|(_, cb)| cb.is_active()),
-    );
+    import_btn.set_sensitive(selections.borrow().values().any(|(_, cb)| cb.is_active()));
 
     row
-}
-
-fn clear_group(group: &PreferencesGroup) {
-    while let Some(child) = group.first_child() {
-        group.remove(&child);
-    }
 }

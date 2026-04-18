@@ -1,18 +1,15 @@
 use adw::prelude::*;
-use adw::{
-    ActionRow, HeaderBar, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
-    ToolbarView,
-};
+use adw::{ActionRow, HeaderBar, NavigationPage, Toast, ToastOverlay, ToolbarView};
 use gtk4::glib::object::IsA;
-use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, ScrolledWindow};
+use gtk4::{Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, ScrolledWindow};
 
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::package::PackageDef;
 
-/// Build the root home page. Navigation happens by pushing follow-up pages
-/// onto `nav`.
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+/// Build the Home tab. Workflow navigation uses [`MainShell::goto_tab`].
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -41,9 +38,9 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
-    let group = PreferencesGroup::new();
-    content.append(&group);
-    refresh_package_list(&group, nav, state);
+    let list = crate::ui::boxed_list_box();
+    content.append(&list);
+    refresh_package_list(&list, shell, state);
 
     let actions_row = GtkBox::builder()
         .orientation(Orientation::Horizontal)
@@ -56,16 +53,16 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["pill"])
         .build();
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
-        let group = group.clone();
+        let list = list.clone();
         let toasts = toasts.clone();
         add_btn.connect_clicked(move |btn| {
             let window = btn.root().and_downcast::<gtk4::Window>();
-            let nav = nav.clone();
             let state = state.clone();
-            let group = group.clone();
+            let list = list.clone();
             let toasts = toasts.clone();
+            let shell = shell.clone();
             ui::package_editor::open(window.as_ref(), None, move |pkg| {
                 let id = pkg.id.clone();
                 let replaced = {
@@ -74,7 +71,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                     let _ = st.registry.save();
                     replaced
                 };
-                refresh_package_list(&group, &nav, &state);
+                shell.refresh_tabs_for_package(&state);
+                refresh_package_list(&list, &shell, &state);
                 toasts.add_toast(Toast::new(&if replaced {
                     format!("Updated {id}")
                 } else {
@@ -90,11 +88,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["pill"])
         .build();
     {
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         manage_btn.connect_clicked(move |_| {
-            let page = ui::manage::build(&nav, &state);
-            nav.push(&page);
+            shell.goto_tab(&state, ProcessTab::Manage);
         });
     }
     actions_row.append(&manage_btn);
@@ -104,7 +101,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["pill"])
         .build();
     {
-        let nav = nav.clone();
+        let nav = shell.nav();
         let state = state.clone();
         import_btn.connect_clicked(move |_| {
             let page = ui::onboarding::build(&nav, &state);
@@ -128,17 +125,16 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
 
     toasts.set_child(Some(&content));
     let page = wrap_page("Home", &toasts);
-    // Tag so follow-up pages can pop_to_tag("home") in one hop.
-    page.set_tag(Some("home"));
+
+    shell.set_home_list(&list);
+
     page
 }
 
 /// Rebuild the package list from the current registry. Called on first
 /// render and whenever a package is added or removed.
-fn refresh_package_list(group: &PreferencesGroup, nav: &NavigationView, state: &AppStateRef) {
-    while let Some(child) = group.first_child() {
-        group.remove(&child);
-    }
+pub(crate) fn refresh_package_list(list: &ListBox, shell: &MainShell, state: &AppStateRef) {
+    crate::ui::clear_boxed_list(list);
 
     let packages = state.borrow().registry.packages.clone();
     if packages.is_empty() {
@@ -146,18 +142,18 @@ fn refresh_package_list(group: &PreferencesGroup, nav: &NavigationView, state: &
             .title("No packages yet")
             .subtitle("Click “Add package…” below to register one.")
             .build();
-        group.add(&empty);
+        list.append(&empty);
         return;
     }
 
     for pkg in packages {
-        group.add(&render_package_row(group, nav, state, &pkg));
+        list.append(&render_package_row(list, shell, state, &pkg));
     }
 }
 
 fn render_package_row(
-    group: &PreferencesGroup,
-    nav: &NavigationView,
+    list: &ListBox,
+    shell: &MainShell,
     state: &AppStateRef,
     pkg: &PackageDef,
 ) -> ActionRow {
@@ -189,34 +185,35 @@ fn render_package_row(
 
     {
         let pkg = pkg.clone();
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         row.connect_activated(move |_| {
             state.borrow_mut().package = Some(pkg.clone());
             state.borrow_mut().config.last_package = Some(pkg.id.clone());
             let _ = state.borrow().config.save();
-            let page = ui::connection::build(&nav, &state);
-            nav.push(&page);
+            shell.refresh_tabs_for_package(&state);
+            shell.goto_tab(&state, ProcessTab::Connection);
         });
     }
 
     {
         let pkg = pkg.clone();
-        let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
-        let group = group.clone();
+        let list = list.clone();
         edit_btn.connect_clicked(move |btn| {
             let window = btn.root().and_downcast::<gtk4::Window>();
-            let nav_inner = nav.clone();
+            let shell_inner = shell.clone();
             let state_inner = state.clone();
-            let group_inner = group.clone();
+            let list_inner = list.clone();
             ui::package_editor::open(window.as_ref(), Some(pkg.clone()), move |updated| {
                 {
                     let mut st = state_inner.borrow_mut();
                     st.registry.upsert(updated);
                     let _ = st.registry.save();
                 }
-                refresh_package_list(&group_inner, &nav_inner, &state_inner);
+                shell_inner.refresh_tabs_for_package(&state_inner);
+                refresh_package_list(&list_inner, &shell_inner, &state_inner);
             });
         });
     }
@@ -224,15 +221,16 @@ fn render_package_row(
     {
         let id = pkg.id.clone();
         let state = state.clone();
-        let group = group.clone();
-        let nav = nav.clone();
+        let list = list.clone();
+        let shell = shell.clone();
         remove_btn.connect_clicked(move |_| {
             {
                 let mut st = state.borrow_mut();
                 st.registry.remove(&id);
                 let _ = st.registry.save();
             }
-            refresh_package_list(&group, &nav, &state);
+            shell.refresh_tabs_for_package(&state);
+            refresh_package_list(&list, &shell, &state);
         });
     }
 

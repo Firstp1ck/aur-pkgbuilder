@@ -104,8 +104,7 @@ impl Config {
 pub fn read_jsonc<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let stripped = StripComments::new(bytes.as_slice());
-    serde_json::from_reader(stripped)
-        .with_context(|| format!("parsing {}", path.display()))
+    serde_json::from_reader(stripped).with_context(|| format!("parsing {}", path.display()))
 }
 
 fn load_from(path: &Path) -> Result<Config> {

@@ -67,16 +67,11 @@ impl Role {
 /// both fields for the same package, the `Maintainer` role wins.
 pub async fn fetch_my_packages(username: &str) -> Result<Vec<AurPackageSummary>, AurAccountError> {
     if username.trim().is_empty() {
-        return Err(AurAccountError::Rpc(
-            "username is empty".into(),
-        ));
+        return Err(AurAccountError::Rpc("username is empty".into()));
     }
 
     let client = reqwest::Client::builder()
-        .user_agent(concat!(
-            "aur-pkgbuilder/",
-            env!("CARGO_PKG_VERSION"),
-        ))
+        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION"),))
         .build()
         .map_err(|e| AurAccountError::Other(anyhow::anyhow!(e)))?;
 
@@ -114,6 +109,7 @@ pub fn to_package_def(summary: &AurPackageSummary) -> PackageDef {
         kind: infer_kind(&summary.name),
         pkgbuild_url: aur_pkgbuild_url(&summary.name),
         icon_name: None,
+        sync_subdir: None,
     }
 }
 

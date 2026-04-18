@@ -80,10 +80,18 @@ impl CheckId {
 
     pub fn description(self) -> &'static str {
         match self {
-            CheckId::BashSyntax => "Parse the PKGBUILD with `bash -n` — catches typos before makepkg.",
-            CheckId::PrintSrcinfo => "`makepkg --printsrcinfo` — PKGBUILD must expose the expected fields.",
-            CheckId::VerifySource => "`makepkg --verifysource` — downloads and checksums every source entry.",
-            CheckId::ShellCheck => "Static analysis for PKGBUILD (optional — install `shellcheck`).",
+            CheckId::BashSyntax => {
+                "Parse the PKGBUILD with `bash -n` — catches typos before makepkg."
+            }
+            CheckId::PrintSrcinfo => {
+                "`makepkg --printsrcinfo` — PKGBUILD must expose the expected fields."
+            }
+            CheckId::VerifySource => {
+                "`makepkg --verifysource` — downloads and checksums every source entry."
+            }
+            CheckId::ShellCheck => {
+                "Static analysis for PKGBUILD with makepkg-oriented shellcheck excludes (optional — install `shellcheck`)."
+            }
             CheckId::Namcap => "Arch packaging lint of the PKGBUILD (optional — install `namcap`).",
             CheckId::FakerootBuild => {
                 "`makepkg -f --noconfirm` — full build using fakeroot for the package() step. Slow."
@@ -158,11 +166,7 @@ impl CheckReport {
 // ---------------------------------------------------------------------------
 
 /// Run a single check by id.
-pub async fn run_check(
-    id: CheckId,
-    package_dir: &Path,
-    events: &Sender<LogLine>,
-) -> CheckReport {
+pub async fn run_check(id: CheckId, package_dir: &Path, events: &Sender<LogLine>) -> CheckReport {
     match id {
         CheckId::BashSyntax => check_bash_syntax(package_dir, events).await,
         CheckId::PrintSrcinfo => check_printsrcinfo(package_dir, events).await,
@@ -191,10 +195,7 @@ pub async fn run_tier(
 
 /// Run the fast tiers (required + optional). Extended checks are **not**
 /// included because they can take minutes — use [`run_extended`] for those.
-pub async fn run_all(
-    package_dir: &Path,
-    events: &Sender<LogLine>,
-) -> Vec<CheckReport> {
+pub async fn run_all(package_dir: &Path, events: &Sender<LogLine>) -> Vec<CheckReport> {
     let mut out = Vec::new();
     for id in CheckId::ALL {
         if id.tier() != CheckTier::Extended {
@@ -206,10 +207,7 @@ pub async fn run_all(
 
 /// Run the extended tier: a full fakeroot build plus `namcap` on the
 /// resulting package. Can take several minutes for complex packages.
-pub async fn run_extended(
-    package_dir: &Path,
-    events: &Sender<LogLine>,
-) -> Vec<CheckReport> {
+pub async fn run_extended(package_dir: &Path, events: &Sender<LogLine>) -> Vec<CheckReport> {
     run_tier(CheckTier::Extended, package_dir, events).await
 }
 
@@ -223,10 +221,7 @@ async fn check_bash_syntax(dir: &Path, events: &Sender<LogLine>) -> CheckReport 
         .await;
     match stream_subprocess("bash", &["-n", "PKGBUILD"], dir, events).await {
         Ok(status) if status.success() => CheckReport::pass(CheckId::BashSyntax),
-        Ok(status) => CheckReport::fail(
-            CheckId::BashSyntax,
-            format!("bash -n exited {status}"),
-        ),
+        Ok(status) => CheckReport::fail(CheckId::BashSyntax, format!("bash -n exited {status}")),
         Err(e) => CheckReport::fail(CheckId::BashSyntax, e),
     }
 }
@@ -237,14 +232,16 @@ async fn check_printsrcinfo(dir: &Path, events: &Sender<LogLine>) -> CheckReport
         .await;
     match run_capture("makepkg", &["--printsrcinfo"], dir).await {
         Ok((status, stdout, stderr)) if status.success() => {
-            let summary = srcinfo_summary(&stdout)
-                .unwrap_or_else(|| "PKGBUILD parsed OK".to_string());
+            let summary =
+                srcinfo_summary(&stdout).unwrap_or_else(|| "PKGBUILD parsed OK".to_string());
             // Echo the first few useful lines into the log for context.
             for line in stdout.lines().take(6) {
                 let _ = events.send(LogLine::Stdout(line.to_string())).await;
             }
             if !stderr.trim().is_empty() {
-                let _ = events.send(LogLine::Stderr(stderr.trim().to_string())).await;
+                let _ = events
+                    .send(LogLine::Stderr(stderr.trim().to_string()))
+                    .await;
             }
             CheckReport {
                 id: CheckId::PrintSrcinfo,
@@ -254,7 +251,9 @@ async fn check_printsrcinfo(dir: &Path, events: &Sender<LogLine>) -> CheckReport
         }
         Ok((status, _, stderr)) => {
             if !stderr.trim().is_empty() {
-                let _ = events.send(LogLine::Stderr(stderr.trim().to_string())).await;
+                let _ = events
+                    .send(LogLine::Stderr(stderr.trim().to_string()))
+                    .await;
             }
             CheckReport::fail(
                 CheckId::PrintSrcinfo,
@@ -286,26 +285,28 @@ async fn check_verifysource(dir: &Path, events: &Sender<LogLine>) -> CheckReport
     }
 }
 
+/// Arguments for `shellcheck` on a PKGBUILD. Passes `-e` for codes that are
+/// usually false positives when `makepkg` sources the file: **SC2034**
+/// (package metadata looks unused), **SC2154** (e.g. `srcdir` is provided by
+/// `makepkg`), **SC2164** (`cd` without `|| exit` while `set -e` still aborts
+/// failed `cd`). See shellcheck.net wiki for each rule id.
+const PKGBUILD_SHELLCHECK_ARGS: &[&str] = &[
+    "-s", "bash", "-S", "warning", "-e", "SC2034", "-e", "SC2154", "-e", "SC2164", "PKGBUILD",
+];
+
 async fn check_shellcheck(dir: &Path, events: &Sender<LogLine>) -> CheckReport {
     if !is_available("shellcheck").await {
         let _ = events
-            .send(LogLine::Info(
-                "shellcheck not on PATH — skipping".into(),
-            ))
+            .send(LogLine::Info("shellcheck not on PATH — skipping".into()))
             .await;
         return CheckReport::skipped(CheckId::ShellCheck, "shellcheck not installed");
     }
     let _ = events
-        .send(LogLine::Info("$ shellcheck -s bash -S warning PKGBUILD".into()))
+        .send(LogLine::Info(
+            "$ shellcheck -s bash -S warning -e SC2034 -e SC2154 -e SC2164 PKGBUILD".into(),
+        ))
         .await;
-    match stream_subprocess(
-        "shellcheck",
-        &["-s", "bash", "-S", "warning", "PKGBUILD"],
-        dir,
-        events,
-    )
-    .await
-    {
+    match stream_subprocess("shellcheck", PKGBUILD_SHELLCHECK_ARGS, dir, events).await {
         Ok(status) if status.success() => CheckReport::pass(CheckId::ShellCheck),
         Ok(status) => CheckReport::warn(
             CheckId::ShellCheck,
@@ -322,9 +323,7 @@ async fn check_namcap(dir: &Path, events: &Sender<LogLine>) -> CheckReport {
             .await;
         return CheckReport::skipped(CheckId::Namcap, "namcap not installed");
     }
-    let _ = events
-        .send(LogLine::Info("$ namcap PKGBUILD".into()))
-        .await;
+    let _ = events.send(LogLine::Info("$ namcap PKGBUILD".into())).await;
     match stream_subprocess("namcap", &["PKGBUILD"], dir, events).await {
         Ok(status) if status.success() => CheckReport::pass(CheckId::Namcap),
         Ok(status) => CheckReport::warn(
@@ -350,14 +349,7 @@ async fn check_fakeroot_build(dir: &Path, events: &Sender<LogLine>) -> CheckRepo
             "$ makepkg -f --noconfirm  (packages its output with fakeroot)".into(),
         ))
         .await;
-    match stream_subprocess(
-        "makepkg",
-        &["-f", "--noconfirm"],
-        dir,
-        events,
-    )
-    .await
-    {
+    match stream_subprocess("makepkg", &["-f", "--noconfirm"], dir, events).await {
         Ok(status) if status.success() => match find_latest_package(dir).await {
             Some(p) => CheckReport {
                 id: CheckId::FakerootBuild,
@@ -374,10 +366,7 @@ async fn check_fakeroot_build(dir: &Path, events: &Sender<LogLine>) -> CheckRepo
                 "makepkg succeeded but no .pkg.tar.* artefact was found",
             ),
         },
-        Ok(status) => CheckReport::fail(
-            CheckId::FakerootBuild,
-            format!("makepkg exited {status}"),
-        ),
+        Ok(status) => CheckReport::fail(CheckId::FakerootBuild, format!("makepkg exited {status}")),
         Err(e) => CheckReport::fail(CheckId::FakerootBuild, e),
     }
 }

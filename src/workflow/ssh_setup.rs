@@ -170,9 +170,7 @@ pub async fn ensure_aur_key(comment: &str) -> Result<(SshKey, KeyState), SshSetu
     let public_path = with_pub_extension(&private_path);
 
     if private_path.is_file() {
-        let contents = read_public_key(&public_path)
-            .await
-            .unwrap_or_default();
+        let contents = read_public_key(&public_path).await.unwrap_or_default();
         let (algorithm, existing_comment) = parse_public_key_header(&contents);
         return Ok((
             SshKey {
@@ -314,8 +312,8 @@ pub async fn full_setup(comment: &str) -> Result<FullSetupReport, SshSetupError>
 // ---------------------------------------------------------------------------
 
 fn ssh_dir() -> Result<PathBuf, SshSetupError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
     Ok(home.join(".ssh"))
 }
 
@@ -409,11 +407,7 @@ async fn fingerprint_of(line: &str) -> Result<String, SshSetupError> {
         .with_context(|| "spawning ssh-keygen -lf -")?;
     if let Some(mut stdin) = child.stdin.take() {
         // Strip leading hostname field: "host key-type blob [comment]" → "key-type blob"
-        let key_only = line
-            .splitn(3, ' ')
-            .skip(1)
-            .collect::<Vec<_>>()
-            .join(" ");
+        let key_only = line.splitn(3, ' ').skip(1).collect::<Vec<_>>().join(" ");
         stdin.write_all(key_only.as_bytes()).await.ok();
         stdin.write_all(b"\n").await.ok();
     }
@@ -529,7 +523,11 @@ mod tests {
 
     #[test]
     fn upsert_creates_block_in_empty_file() {
-        let (out, state) = upsert_host_block("", "aur.archlinux.org", "Host aur.archlinux.org\n    User aur\n");
+        let (out, state) = upsert_host_block(
+            "",
+            "aur.archlinux.org",
+            "Host aur.archlinux.org\n    User aur\n",
+        );
         assert_eq!(state, ConfigState::Created);
         assert!(out.contains("Host aur.archlinux.org"));
     }

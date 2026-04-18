@@ -83,7 +83,9 @@ impl LogView {
         let mut end = self.buffer.end_iter();
         self.buffer.insert(&mut end, "\n");
 
-        let mark = self.buffer.create_mark(None, &self.buffer.end_iter(), false);
+        let mark = self
+            .buffer
+            .create_mark(None, &self.buffer.end_iter(), false);
         if let Some(view) = self.widget.child().and_downcast::<TextView>() {
             view.scroll_to_mark(&mark, 0.0, false, 0.0, 0.0);
         }

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use adw::prelude::*;
 use adw::{ActionRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
-use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation};
 
 use crate::runtime;
 use crate::state::AppStateRef;
@@ -28,11 +28,7 @@ pub enum SshSetupFlavor {
     FromOnboarding,
 }
 
-pub fn build(
-    nav: &NavigationView,
-    state: &AppStateRef,
-    flavor: SshSetupFlavor,
-) -> NavigationPage {
+pub fn build(nav: &NavigationView, state: &AppStateRef, flavor: SshSetupFlavor) -> NavigationPage {
     let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -63,14 +59,25 @@ pub fn build(
 
     content.append(&one_click_group(state, &toasts));
 
-    let keys_group = PreferencesGroup::builder()
-        .title("Your SSH keys")
-        .description("Detected under ~/.ssh. Click “Use for AUR” to select one.")
+    let keys_title = Label::builder()
+        .label("Your SSH keys")
+        .halign(Align::Start)
+        .css_classes(vec!["title-4"])
         .build();
-    content.append(&keys_group);
-    refresh_keys_group(&keys_group, state, &toasts);
+    let keys_desc = Label::builder()
+        .label("Detected under ~/.ssh. Click “Use for AUR” to select one.")
+        .halign(Align::Start)
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(vec!["dim-label"])
+        .build();
+    content.append(&keys_title);
+    content.append(&keys_desc);
+    let keys_list = ui::boxed_list_box();
+    content.append(&keys_list);
+    refresh_keys_group(&keys_list, state, &toasts);
 
-    content.append(&key_group(state, &toasts, &keys_group));
+    content.append(&key_group(state, &toasts, &keys_list));
     content.append(&publish_group(state, &toasts));
     content.append(&connectivity_group(state, &toasts));
     content.append(&done_row(nav, &toasts, flavor));
@@ -118,8 +125,7 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGro
                 btn_cb.set_sensitive(true);
                 match res {
                     Ok(report) => apply_full_setup(&state_cb, &toasts_cb, report),
-                    Err(err) => toasts_cb
-                        .add_toast(Toast::new(&format!("Setup failed: {err}"))),
+                    Err(err) => toasts_cb.add_toast(Toast::new(&format!("Setup failed: {err}"))),
                 }
             },
         );
@@ -164,11 +170,9 @@ fn apply_full_setup(state: &AppStateRef, toasts: &ToastOverlay, report: FullSetu
 // Section: detected keys
 // ---------------------------------------------------------------------------
 
-fn refresh_keys_group(group: &PreferencesGroup, state: &AppStateRef, toasts: &ToastOverlay) {
-    while let Some(child) = group.first_child() {
-        group.remove(&child);
-    }
-    let group = group.clone();
+fn refresh_keys_group(list: &ListBox, state: &AppStateRef, toasts: &ToastOverlay) {
+    ui::clear_boxed_list(list);
+    let list = list.clone();
     let state = state.clone();
     let toasts = toasts.clone();
     runtime::spawn(ssh_setup::list_keys(), move |res| match res {
@@ -177,11 +181,11 @@ fn refresh_keys_group(group: &PreferencesGroup, state: &AppStateRef, toasts: &To
                 .title("No SSH keys found")
                 .subtitle("Run the one-click setup above to create ~/.ssh/aur.")
                 .build();
-            group.add(&empty);
+            list.append(&empty);
         }
         Ok(keys) => {
             for key in keys {
-                group.add(&render_key_row(&state, &toasts, &key));
+                list.append(&render_key_row(&state, &toasts, &key));
             }
         }
         Err(err) => {
@@ -241,11 +245,7 @@ fn render_key_row(state: &AppStateRef, toasts: &ToastOverlay, key: &SshKey) -> A
 // Section: per-step — create/reuse ~/.ssh/aur
 // ---------------------------------------------------------------------------
 
-fn key_group(
-    state: &AppStateRef,
-    toasts: &ToastOverlay,
-    keys_group: &PreferencesGroup,
-) -> PreferencesGroup {
+fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) -> PreferencesGroup {
     let group = PreferencesGroup::builder()
         .title("AUR key (~/.ssh/aur)")
         .description("Reuses the file if it already exists; otherwise generates a new ed25519 key.")
@@ -265,13 +265,13 @@ fn key_group(
 
     let state = state.clone();
     let toasts = toasts.clone();
-    let keys_group = keys_group.clone();
+    let keys_list = keys_list.clone();
     btn.connect_clicked(move |btn| {
         btn.set_sensitive(false);
         let comment = whoami_comment();
         let state_cb = state.clone();
         let toasts_cb = toasts.clone();
-        let keys_group_cb = keys_group.clone();
+        let keys_list_cb = keys_list.clone();
         let btn_cb = btn.clone();
         runtime::spawn(
             async move { ssh_setup::ensure_aur_key(&comment).await },
@@ -281,15 +281,14 @@ fn key_group(
                     Ok((key, KeyState::Generated)) => {
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
                         let _ = state_cb.borrow().config.save();
-                        refresh_keys_group(&keys_group_cb, &state_cb, &toasts_cb);
+                        refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
                         toasts_cb.add_toast(Toast::new("Generated ~/.ssh/aur"));
                     }
                     Ok((key, KeyState::Reused)) => {
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
                         let _ = state_cb.borrow().config.save();
-                        refresh_keys_group(&keys_group_cb, &state_cb, &toasts_cb);
-                        toasts_cb
-                            .add_toast(Toast::new("Reused existing ~/.ssh/aur"));
+                        refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
+                        toasts_cb.add_toast(Toast::new("Reused existing ~/.ssh/aur"));
                     }
                     Err(err) => {
                         toasts_cb.add_toast(Toast::new(&format!("Key setup failed: {err}")));

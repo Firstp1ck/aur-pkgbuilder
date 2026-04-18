@@ -24,7 +24,10 @@ pub async fn ensure_clone(
     let dir = aur_clone_dir(work_dir, pkg_id);
     if dir.join(".git").is_dir() {
         let _ = events
-            .send(LogLine::Info(format!("AUR clone already present at {}", dir.display())))
+            .send(LogLine::Info(format!(
+                "AUR clone already present at {}",
+                dir.display()
+            )))
             .await;
         return Ok(dir);
     }
@@ -32,14 +35,15 @@ pub async fn ensure_clone(
         fs::create_dir_all(parent).await?;
     }
     let _ = events
-        .send(LogLine::Info(format!("$ git clone {} {}", ssh_url, dir.display())))
+        .send(LogLine::Info(format!(
+            "$ git clone {} {}",
+            ssh_url,
+            dir.display()
+        )))
         .await;
 
     run_capture(
-        Command::new("git")
-            .arg("clone")
-            .arg(ssh_url)
-            .arg(&dir),
+        Command::new("git").arg("clone").arg(ssh_url).arg(&dir),
         Path::new("."),
         events,
     )
@@ -62,6 +66,32 @@ pub async fn stage_files(build_dir: &Path, clone_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// What: Whether the clone’s working tree differs from `HEAD` (after staging
+/// files from the build dir, this is “would a commit do anything?”).
+///
+/// Output:
+/// - `Ok(false)` when `git diff --quiet HEAD` exits 0 (no changes).
+/// - `Ok(true)` when it exits 1 (differs).
+///
+/// Details:
+/// - Uses the same comparison as `git diff HEAD` in [`diff`].
+pub async fn has_changes_vs_head(clone_dir: &Path) -> Result<bool> {
+    let status = Command::new("git")
+        .arg("diff")
+        .arg("--quiet")
+        .arg("HEAD")
+        .current_dir(clone_dir)
+        .status()
+        .await
+        .context("spawning git diff --quiet HEAD")?;
+    match status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        Some(c) => anyhow::bail!("git diff --quiet HEAD exited with {c}"),
+        None => anyhow::bail!("git diff --quiet HEAD: no exit code"),
+    }
+}
+
 /// `git diff --stat` + `git diff` of everything in the clone. Used for the
 /// publish preview.
 pub async fn diff(clone_dir: &Path) -> Result<String> {
@@ -71,12 +101,9 @@ pub async fn diff(clone_dir: &Path) -> Result<String> {
     )
     .await
     .unwrap_or_default();
-    let body = run_capture_stdout(
-        Command::new("git").arg("diff").arg("HEAD"),
-        clone_dir,
-    )
-    .await
-    .unwrap_or_default();
+    let body = run_capture_stdout(Command::new("git").arg("diff").arg("HEAD"), clone_dir)
+        .await
+        .unwrap_or_default();
     let mut out = String::new();
     if !stat.trim().is_empty() {
         out.push_str(&stat);
@@ -96,7 +123,10 @@ pub async fn commit_and_push(
     events: &Sender<LogLine>,
 ) -> Result<()> {
     run_capture(
-        Command::new("git").arg("add").arg("PKGBUILD").arg(".SRCINFO"),
+        Command::new("git")
+            .arg("add")
+            .arg("PKGBUILD")
+            .arg(".SRCINFO"),
         clone_dir,
         events,
     )
@@ -109,9 +139,7 @@ pub async fn commit_and_push(
         .output()
         .await?;
     if status.stdout.is_empty() {
-        let _ = events
-            .send(LogLine::Info("nothing to commit".into()))
-            .await;
+        let _ = events.send(LogLine::Info("nothing to commit".into())).await;
         return Ok(());
     }
 
@@ -130,11 +158,7 @@ pub async fn commit_and_push(
     Ok(())
 }
 
-async fn run_capture(
-    cmd: &mut Command,
-    cwd: &Path,
-    events: &Sender<LogLine>,
-) -> Result<()> {
+async fn run_capture(cmd: &mut Command, cwd: &Path, events: &Sender<LogLine>) -> Result<()> {
     let output = cmd
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -145,14 +169,18 @@ async fn run_capture(
     if !output.stdout.is_empty() {
         let _ = events
             .send(LogLine::Stdout(
-                String::from_utf8_lossy(&output.stdout).trim_end().to_string(),
+                String::from_utf8_lossy(&output.stdout)
+                    .trim_end()
+                    .to_string(),
             ))
             .await;
     }
     if !output.stderr.is_empty() {
         let _ = events
             .send(LogLine::Stderr(
-                String::from_utf8_lossy(&output.stderr).trim_end().to_string(),
+                String::from_utf8_lossy(&output.stderr)
+                    .trim_end()
+                    .to_string(),
             ))
             .await;
     }

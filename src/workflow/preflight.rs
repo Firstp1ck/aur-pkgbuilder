@@ -14,9 +14,21 @@ pub struct ToolCheck {
 }
 
 const REQUIRED: &[(&str, &str, &str)] = &[
-    ("makepkg", "build Arch packages", "pacman -S --needed base-devel"),
-    ("git", "clone and push the AUR repo", "pacman -S --needed git"),
-    ("ssh", "talk to aur.archlinux.org", "pacman -S --needed openssh"),
+    (
+        "makepkg",
+        "build Arch packages",
+        "pacman -S --needed base-devel",
+    ),
+    (
+        "git",
+        "clone and push the AUR repo",
+        "pacman -S --needed git",
+    ),
+    (
+        "ssh",
+        "talk to aur.archlinux.org",
+        "pacman -S --needed openssh",
+    ),
     (
         "updpkgsums",
         "refresh sha256sums in the PKGBUILD",
@@ -91,7 +103,11 @@ pub async fn probe_aur_ssh(key: Option<&Path>) -> Result<SshProbe> {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(-1);
-    let banner = if stdout.trim().is_empty() { stderr.clone() } else { stdout };
+    let banner = if stdout.trim().is_empty() {
+        stderr.clone()
+    } else {
+        stdout
+    };
 
     // AUR answers "Interactive shell is disabled. Welcome, <user>!"
     if banner.contains("Welcome") {
@@ -100,5 +116,8 @@ pub async fn probe_aur_ssh(key: Option<&Path>) -> Result<SshProbe> {
     if banner.contains("Permission denied") || banner.contains("publickey") {
         return Ok(SshProbe::KeyRejected { banner });
     }
-    Ok(SshProbe::Failed { stderr: banner, exit_code })
+    Ok(SshProbe::Failed {
+        stderr: banner,
+        exit_code,
+    })
 }

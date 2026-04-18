@@ -4,6 +4,7 @@ pub mod aur_git;
 pub mod aur_ssh;
 pub mod build;
 pub mod package;
+pub mod pkgbuild_edit;
 pub mod preflight;
 pub mod registry;
 pub mod ssh_setup;

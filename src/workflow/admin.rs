@@ -16,6 +16,7 @@ use thiserror::Error;
 use tokio::process::Command;
 
 use super::package::PackageDef;
+use super::sync;
 
 /// Typed outcome of a lifecycle call.
 #[derive(Debug, Error)]
@@ -55,10 +56,7 @@ pub enum UpdateStatus {
 /// The AUR creates the repo on first push, so this is the canonical
 /// first-time registration path. It is intentionally gated behind a
 /// placeholder because a bad push can clobber an existing upstream.
-pub async fn register_on_aur(
-    _work_dir: &Path,
-    _pkg: &PackageDef,
-) -> Result<(), AdminError> {
+pub async fn register_on_aur(_work_dir: &Path, _pkg: &PackageDef) -> Result<(), AdminError> {
     Err(AdminError::NotImplemented("Register new AUR package"))
 }
 
@@ -72,10 +70,7 @@ pub async fn register_on_aur(
 ///    suffix (`-git`, `-bin`) or the `source=` scheme.
 /// 4. Return a populated [`PackageDef`] that the caller can save into the
 ///    registry via `Registry::upsert`.
-pub async fn import_from_aur(
-    _work_dir: &Path,
-    _aur_id: &str,
-) -> Result<PackageDef, AdminError> {
+pub async fn import_from_aur(_work_dir: &Path, _aur_id: &str) -> Result<PackageDef, AdminError> {
     Err(AdminError::NotImplemented("Import from existing AUR"))
 }
 
@@ -106,8 +101,8 @@ pub async fn archive(_pkg_id: &str) -> Result<(), AdminError> {
 
 /// Functional helper: open the package's working directory in the user's
 /// file manager via `xdg-open`. Useful for inspecting build artefacts.
-pub async fn open_work_dir(work_dir: &Path, pkg_id: &str) -> Result<PathBuf, AdminError> {
-    let dir = work_dir.join(pkg_id);
+pub async fn open_work_dir(work_dir: &Path, pkg: &PackageDef) -> Result<PathBuf, AdminError> {
+    let dir = sync::package_dir(work_dir, pkg);
     if !dir.exists() {
         tokio::fs::create_dir_all(&dir)
             .await

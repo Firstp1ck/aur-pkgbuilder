@@ -28,12 +28,13 @@ const REGISTRY_HEADER: &str = "\
 // block; those lines will stay intact.
 //
 // Each entry:
-//   id            AUR pkgname (also the directory name under work_dir)
+//   id            AUR pkgname (default directory name under work_dir)
 //   title         display title shown on the home card
 //   subtitle      short description
 //   kind          \"bin\" | \"git\" | \"other\" (tunes UI hints only)
 //   pkgbuild_url  raw URL to the upstream PKGBUILD
 //   icon_name     optional freedesktop icon name (null = auto)
+//   sync_subdir   optional relative path under work_dir for this package (null = use id)
 ";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -12,6 +12,7 @@ use adw::{ComboRow, EntryRow, PreferencesGroup, Window};
 use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Orientation, StringList};
 
 use crate::workflow::package::{PackageDef, PackageKind};
+use crate::workflow::sync as sync_wf;
 
 type SaveCallback = Rc<RefCell<Option<Box<dyn FnOnce(PackageDef)>>>>;
 
@@ -23,10 +24,15 @@ pub fn open(
     existing: Option<PackageDef>,
     on_save: impl FnOnce(PackageDef) + 'static,
 ) {
+    const MIN_W: i32 = 440;
+    const MIN_H: i32 = 360;
+
     let window = Window::builder()
         .modal(true)
         .default_width(520)
         .default_height(420)
+        .width_request(MIN_W)
+        .height_request(MIN_H)
         .title(if existing.is_some() {
             "Edit package"
         } else {
@@ -63,6 +69,9 @@ pub fn open(
     let title_row = EntryRow::builder().title("Display title").build();
     let subtitle_row = EntryRow::builder().title("Short description").build();
     let url_row = EntryRow::builder().title("PKGBUILD URL (raw)").build();
+    let sync_folder_row = EntryRow::builder()
+        .title("Build folder — relative to working dir (blank = package id; e.g. my-group/pkg)")
+        .build();
     let icon_row = EntryRow::builder()
         .title("Icon name (optional, freedesktop)")
         .build();
@@ -83,6 +92,9 @@ pub fn open(
         title_row.set_text(&pkg.title);
         subtitle_row.set_text(&pkg.subtitle);
         url_row.set_text(&pkg.pkgbuild_url);
+        if let Some(sub) = &pkg.sync_subdir {
+            sync_folder_row.set_text(sub);
+        }
         if let Some(icon) = &pkg.icon_name {
             icon_row.set_text(icon);
         }
@@ -95,6 +107,7 @@ pub fn open(
     group.add(&title_row);
     group.add(&subtitle_row);
     group.add(&url_row);
+    group.add(&sync_folder_row);
     group.add(&kind_row);
     group.add(&icon_row);
     body.append(&group);
@@ -115,6 +128,7 @@ pub fn open(
         let title_row = title_row.clone();
         let subtitle_row = subtitle_row.clone();
         let url_row = url_row.clone();
+        let sync_folder_row = sync_folder_row.clone();
         let icon_row = icon_row.clone();
         let kind_row = kind_row.clone();
         let once: SaveCallback = Rc::new(RefCell::new(Some(Box::new(on_save))));
@@ -133,6 +147,14 @@ pub fn open(
                 .copied()
                 .unwrap_or(PackageKind::Bin);
 
+            let sync_raw = sync_folder_row.text().to_string();
+            if sync_wf::validate_sync_subdir(&sync_raw).is_err() {
+                sync_folder_row.add_css_class("error");
+                return;
+            }
+            sync_folder_row.remove_css_class("error");
+            let sync_subdir = non_empty(&sync_folder_row.text());
+
             let pkg = PackageDef {
                 id,
                 title,
@@ -140,6 +162,7 @@ pub fn open(
                 kind,
                 pkgbuild_url: url,
                 icon_name,
+                sync_subdir,
             };
             if let Some(cb) = once.borrow_mut().take() {
                 cb(pkg);

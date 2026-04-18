@@ -5,7 +5,9 @@
 //! Destructive commands (adopt, disown, setup-repo) are visually tagged.
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay};
+use adw::{
+    ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
+};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
 use crate::runtime;
@@ -174,14 +176,7 @@ fn render_command_row(
                 let log_cb = log.clone();
                 move |tx| async move {
                     let _ = log_cb;
-                    aur_ssh::run(
-                        cmd,
-                        package.as_deref(),
-                        &extra,
-                        key.as_deref(),
-                        &tx,
-                    )
-                    .await
+                    aur_ssh::run(cmd, package.as_deref(), &extra, key.as_deref(), &tx).await
                 }
             },
             {
@@ -195,10 +190,7 @@ fn render_command_row(
                         toasts_cb.add_toast(Toast::new(&format!("{}: ok", cmd.cmd())));
                     }
                     Ok(status) => {
-                        toasts_cb.add_toast(Toast::new(&format!(
-                            "{}: exited {status}",
-                            cmd.cmd()
-                        )));
+                        toasts_cb.add_toast(Toast::new(&format!("{}: exited {status}", cmd.cmd())));
                     }
                     Err(e) => {
                         toasts_cb.add_toast(Toast::new(&format!("{}: {e}", cmd.cmd())));
