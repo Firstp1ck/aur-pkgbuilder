@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, Banner, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -31,8 +31,18 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     content.append(&heading);
 
+    let stale_banner = Banner::builder().revealed(false).build();
+    ui::pkgbuild_stale::banner_set_pkgbuild_stale(&stale_banner, &pkg);
+    content.append(&stale_banner);
+
     content.append(&kind_hint(&pkg));
-    content.append(&ui::pkgbuild_editor::build_section(state, &pkg, &toasts));
+    content.append(&ui::pkgbuild_editor::build_section(
+        shell,
+        state,
+        &pkg,
+        &toasts,
+        &stale_banner,
+    ));
     content.append(&checksum_group(state, &pkg, &toasts));
 
     let continue_btn = Button::builder()
@@ -118,11 +128,13 @@ fn checksum_group(
     let run_btn_c = run_btn.clone();
     let pkg = pkg.clone();
     run_btn.connect_clicked(move |_| {
-        let Some(work) = state.borrow().config.work_dir.clone() else {
-            toasts.add_toast(Toast::new("No working directory configured."));
+        let work = state.borrow().config.work_dir.clone();
+        let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+            toasts.add_toast(Toast::new(
+                "Set a working directory on Connection or pick a destination folder on Sync.",
+            ));
             return;
         };
-        let dir = sync::package_dir(&work, &pkg);
         spinner_c.start();
         run_btn_c.set_sensitive(false);
         log.clear();

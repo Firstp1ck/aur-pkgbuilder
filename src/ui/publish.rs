@@ -230,7 +230,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 toasts.add_toast(Toast::new("No working directory configured."));
                 return;
             };
-            let build_dir = sync::package_dir(&work, &pkg_st);
+            let Some(build_dir) = sync::package_dir(Some(work.as_path()), &pkg_st) else {
+                toasts.add_toast(Toast::new(
+                    "Could not resolve the package directory — check Sync destination or Connection.",
+                ));
+                return;
+            };
             spinner.start();
             stage_btn_inner.set_sensitive(false);
             log.clear();

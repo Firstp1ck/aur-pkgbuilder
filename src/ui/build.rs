@@ -86,15 +86,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let clean = clean.clone();
         let pkg = pkg.clone();
         build_btn.connect_clicked(move |_| {
-            let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("No working directory configured."));
+            let work = state.borrow().config.work_dir.clone();
+            let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+                toasts.add_toast(Toast::new(
+                    "Set a working directory on Connection or pick a destination folder on Sync.",
+                ));
                 return;
             };
             if nix_is_root() {
                 toasts.add_toast(Toast::new("Refusing to build as root."));
                 return;
             }
-            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             status.set_text("building…");
             spinner.start();

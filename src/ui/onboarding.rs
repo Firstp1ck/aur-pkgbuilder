@@ -11,19 +11,19 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{
-    ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
-};
+use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::shell::MainShell;
 use crate::workflow::aur_account::{self, AurAccountError, AurPackageSummary, Role};
 
 type SelectionMap = Rc<RefCell<HashMap<String, (AurPackageSummary, CheckButton)>>>;
 
-pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
+pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
+    let nav = shell.nav();
     let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -208,6 +208,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     // --- Import + push SSH setup ---
     {
         let nav = nav.clone();
+        let shell = shell.clone();
         let state = state.clone();
         let selections = selections.clone();
         let toasts = toasts.clone();
@@ -231,6 +232,7 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
                 let _ = st.registry.save();
             }
             toasts.add_toast(Toast::new(&format!("Imported {count} package(s)")));
+            shell.refresh_tab_headers_from_state(&state);
             let page =
                 ui::ssh_setup::build(&nav, &state, ui::ssh_setup::SshSetupFlavor::FromOnboarding);
             nav.push(&page);

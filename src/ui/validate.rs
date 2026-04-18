@@ -33,7 +33,7 @@ struct RowHandles {
 type RowMap = Rc<RefCell<HashMap<CheckId, RowHandles>>>;
 
 /// Runs bash / `.SRCINFO` / `verifysource` checks in the background. No-op when
-/// `work_dir` is unset (same as manual actions).
+/// the package directory cannot be resolved.
 fn spawn_required_tier_streaming(
     state: &AppStateRef,
     rows: &RowMap,
@@ -42,11 +42,11 @@ fn spawn_required_tier_streaming(
     summary_status: &Label,
     pkg: &PackageDef,
 ) {
-    let Some(work) = state.borrow().config.work_dir.clone() else {
+    let work = state.borrow().config.work_dir.clone();
+    let pkg = pkg.clone();
+    let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
         return;
     };
-    let pkg = pkg.clone();
-    let dir = sync::package_dir(&work, &pkg);
     summary_status.set_text("running required checks…");
     mark_tier_running(rows, CheckTier::Required);
 
@@ -91,9 +91,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(
-            "Required checks run automatically when you open this page (when a working \
-             directory is set). Use “Run all checks” to include optional lints. Failures \
-             in required checks will very likely also fail the build.",
+            "Required checks run automatically when you open this page (when the package \
+             directory is known — working directory or an absolute destination on Sync). \
+             Use “Run all checks” to include optional lints. Failures in required checks will \
+             very likely also fail the build.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -124,7 +125,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     for id in CheckId::ALL {
-        let (row, handles) = render_check_row(id, state, &pkg, &log, &rows);
+        let (row, handles) = render_check_row(id, state, &pkg, &log, &rows, &toasts);
         rows.borrow_mut().insert(id, handles);
         match id.tier() {
             CheckTier::Required => required.add(&row),
@@ -178,11 +179,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let summary_status = summary_status.clone();
         let pkg = pkg.clone();
         run_all_btn.connect_clicked(move |_| {
-            let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("No working directory configured."));
+            let work = state.borrow().config.work_dir.clone();
+            let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+                toasts.add_toast(Toast::new(
+                    "Set a working directory on Connection or pick a destination folder on Sync.",
+                ));
                 return;
             };
-            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             summary_status.set_text("running fast checks…");
             mark_tier_running(&rows, CheckTier::Required);
@@ -222,11 +225,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let pkg = pkg.clone();
         let run_extended_inner = run_extended_btn.clone();
         run_extended_btn.connect_clicked(move |_| {
-            let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("No working directory configured."));
+            let work = state.borrow().config.work_dir.clone();
+            let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+                toasts.add_toast(Toast::new(
+                    "Set a working directory on Connection or pick a destination folder on Sync.",
+                ));
                 return;
             };
-            let dir = sync::package_dir(&work, &pkg);
             log.clear();
             summary_status.set_text("running extended checks — this may take a while…");
             mark_tier_running(&rows, CheckTier::Extended);
@@ -278,6 +283,7 @@ fn render_check_row(
     pkg: &PackageDef,
     log: &LogView,
     rows: &RowMap,
+    toasts: &ToastOverlay,
 ) -> (ActionRow, RowHandles) {
     let row = ActionRow::builder()
         .title(id.title())
@@ -310,11 +316,15 @@ fn render_check_row(
         let rows = rows.clone();
         let log = log.clone();
         let pkg = pkg.clone();
+        let toasts = toasts.clone();
         run_btn.connect_clicked(move |_| {
-            let Some(work) = state.borrow().config.work_dir.clone() else {
+            let work = state.borrow().config.work_dir.clone();
+            let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+                toasts.add_toast(Toast::new(
+                    "Set a working directory on Connection or pick a destination folder on Sync.",
+                ));
                 return;
             };
-            let dir = sync::package_dir(&work, &pkg);
             mark_running(&rows, id);
             let rows_done = rows.clone();
             let log_cb = log.clone();

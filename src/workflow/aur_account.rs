@@ -109,7 +109,9 @@ pub fn to_package_def(summary: &AurPackageSummary) -> PackageDef {
         kind: infer_kind(&summary.name),
         pkgbuild_url: aur_pkgbuild_url(&summary.name),
         icon_name: None,
+        destination_dir: None,
         sync_subdir: None,
+        pkgbuild_refreshed_at_unix: None,
     }
 }
 

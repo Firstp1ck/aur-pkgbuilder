@@ -33,8 +33,10 @@ const REGISTRY_HEADER: &str = "\
 //   subtitle      short description
 //   kind          \"bin\" | \"git\" | \"other\" (tunes UI hints only)
 //   pkgbuild_url  raw URL to the upstream PKGBUILD
-//   icon_name     optional freedesktop icon name (null = auto)
-//   sync_subdir   optional relative path under work_dir for this package (null = use id)
+//   icon_name        optional freedesktop icon name (null = auto)
+//   destination_dir  optional absolute folder for PKGBUILD + builds (null = work_dir/id)
+//   sync_subdir      legacy relative path under work_dir (ignored if destination_dir is set)
+//   pkgbuild_refreshed_at_unix  optional Unix time when PKGBUILD was last Sync-downloaded or Version-Reloaded
 ";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

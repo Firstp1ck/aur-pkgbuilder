@@ -63,7 +63,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let list = list.clone();
             let toasts = toasts.clone();
             let shell = shell.clone();
-            ui::package_editor::open(window.as_ref(), None, move |pkg| {
+            let work_dir = state.borrow().config.work_dir.clone();
+            ui::package_editor::open(window.as_ref(), work_dir, None, move |pkg| {
                 let id = pkg.id.clone();
                 let replaced = {
                     let mut st = state.borrow_mut();
@@ -102,9 +103,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     {
         let nav = shell.nav();
+        let shell = shell.clone();
         let state = state.clone();
         import_btn.connect_clicked(move |_| {
-            let page = ui::onboarding::build(&nav, &state);
+            let page = ui::onboarding::build(&shell, &state);
             nav.push(&page);
         });
     }
@@ -143,12 +145,14 @@ pub(crate) fn refresh_package_list(list: &ListBox, shell: &MainShell, state: &Ap
             .subtitle("Click “Add package…” below to register one.")
             .build();
         list.append(&empty);
+        shell.refresh_tab_headers_from_state(state);
         return;
     }
 
     for pkg in packages {
         list.append(&render_package_row(list, shell, state, &pkg));
     }
+    shell.refresh_tab_headers_from_state(state);
 }
 
 fn render_package_row(
@@ -206,15 +210,21 @@ fn render_package_row(
             let shell_inner = shell.clone();
             let state_inner = state.clone();
             let list_inner = list.clone();
-            ui::package_editor::open(window.as_ref(), Some(pkg.clone()), move |updated| {
-                {
-                    let mut st = state_inner.borrow_mut();
-                    st.registry.upsert(updated);
-                    let _ = st.registry.save();
-                }
-                shell_inner.refresh_tabs_for_package(&state_inner);
-                refresh_package_list(&list_inner, &shell_inner, &state_inner);
-            });
+            let work_dir = state_inner.borrow().config.work_dir.clone();
+            ui::package_editor::open(
+                window.as_ref(),
+                work_dir,
+                Some(pkg.clone()),
+                move |updated| {
+                    {
+                        let mut st = state_inner.borrow_mut();
+                        st.registry.upsert(updated);
+                        let _ = st.registry.save();
+                    }
+                    shell_inner.refresh_tabs_for_package(&state_inner);
+                    refresh_package_list(&list_inner, &shell_inner, &state_inner);
+                },
+            );
         });
     }
 

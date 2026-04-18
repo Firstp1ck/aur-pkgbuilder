@@ -35,7 +35,6 @@ pub struct PkgbuildQuickFields {
     pub arch_tokens: Option<String>,
     pub url: Option<String>,
     pub license_tokens: Option<String>,
-    pub options_tokens: Option<String>,
     pub depends_tokens: Option<String>,
     pub makedepends_tokens: Option<String>,
     pub conflicts_tokens: Option<String>,
@@ -88,7 +87,6 @@ pub fn parse_quick_fields(text: &str) -> PkgbuildQuickFields {
             "arch" => out.arch_tokens = Some(array_inner_tokens(inner)),
             "url" => out.url = Some(inner.to_string()),
             "license" => out.license_tokens = Some(array_inner_tokens(inner)),
-            "options" => out.options_tokens = Some(array_inner_tokens(inner)),
             "depends" => out.depends_tokens = Some(array_inner_tokens(inner)),
             "makedepends" => out.makedepends_tokens = Some(array_inner_tokens(inner)),
             "conflicts" => out.conflicts_tokens = Some(array_inner_tokens(inner)),
@@ -126,9 +124,6 @@ pub fn merge_quick_fields(text: &str, fields: &PkgbuildQuickFields) -> String {
     }
     if let Some(v) = &fields.license_tokens {
         cur = merge_assignment_line(&cur, "license", &bash_array_from_tokens(v));
-    }
-    if let Some(v) = &fields.options_tokens {
-        cur = merge_assignment_line(&cur, "options", &bash_array_from_tokens(v));
     }
     if let Some(v) = &fields.depends_tokens {
         cur = merge_assignment_line(&cur, "depends", &bash_array_from_tokens(v));

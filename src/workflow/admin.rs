@@ -101,8 +101,15 @@ pub async fn archive(_pkg_id: &str) -> Result<(), AdminError> {
 
 /// Functional helper: open the package's working directory in the user's
 /// file manager via `xdg-open`. Useful for inspecting build artefacts.
-pub async fn open_work_dir(work_dir: &Path, pkg: &PackageDef) -> Result<PathBuf, AdminError> {
-    let dir = sync::package_dir(work_dir, pkg);
+pub async fn open_work_dir(
+    work_dir: Option<&Path>,
+    pkg: &PackageDef,
+) -> Result<PathBuf, AdminError> {
+    let Some(dir) = sync::package_dir(work_dir, pkg) else {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "Set a working directory or choose a destination folder for this package."
+        )));
+    };
     if !dir.exists() {
         tokio::fs::create_dir_all(&dir)
             .await

@@ -193,6 +193,31 @@ pub async fn run_tier(
     out
 }
 
+/// What: Runs a tier while discarding streamed log lines.
+///
+/// Inputs:
+/// - `tier`: which checks to run.
+/// - `package_dir`: directory containing `PKGBUILD`.
+///
+/// Output:
+/// - The same [`CheckReport`] list as [`run_tier`], suitable for summary badges.
+///
+/// Details:
+/// - Used for tab-header status probes where UI log output is unnecessary.
+pub async fn run_tier_silent(tier: CheckTier, package_dir: &Path) -> Vec<CheckReport> {
+    let (tx, rx) = async_channel::unbounded::<LogLine>();
+    let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
+    let reports = run_tier(tier, package_dir, &tx).await;
+    drop(tx);
+    let _ = drain.await;
+    reports
+}
+
+/// True when every required-tier outcome is [`CheckOutcome::Pass`].
+pub fn required_tier_all_pass(reports: &[CheckReport]) -> bool {
+    !reports.is_empty() && reports.iter().all(|r| r.outcome == CheckOutcome::Pass)
+}
+
 /// Run the fast tiers (required + optional). Extended checks are **not**
 /// included because they can take minutes — use [`run_extended`] for those.
 pub async fn run_all(package_dir: &Path, events: &Sender<LogLine>) -> Vec<CheckReport> {
@@ -535,5 +560,40 @@ fn srcinfo_summary(src: &str) -> Option<String> {
     match (base, ver, rel) {
         (Some(b), Some(v), Some(r)) => Some(format!("{b} {v}-{r}")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tab_summary_tests {
+    use super::{CheckId, CheckOutcome, CheckReport, required_tier_all_pass};
+
+    #[test]
+    fn required_tier_all_pass_false_on_empty() {
+        assert!(!required_tier_all_pass(&[]));
+    }
+
+    #[test]
+    fn required_tier_all_pass_true_only_when_all_pass() {
+        let ok = [
+            CheckReport {
+                id: CheckId::BashSyntax,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::PrintSrcinfo,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::VerifySource,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+        ];
+        assert!(required_tier_all_pass(&ok));
+        let mut bad = ok.clone();
+        bad[1].outcome = CheckOutcome::Fail;
+        assert!(!required_tier_all_pass(&bad));
     }
 }

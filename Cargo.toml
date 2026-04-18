@@ -22,6 +22,11 @@ dirs = "5"
 once_cell = "1"
 futures-util = "0.3"
 async-channel = "2"
+similar = "2.7"
+
+[lints.clippy]
+# Uses `cognitive-complexity-threshold` from `clippy.toml`.
+cognitive_complexity = "warn"
 
 [profile.release]
 lto = "thin"

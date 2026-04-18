@@ -50,7 +50,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
-    content.append(&global_actions_group(state, &toasts));
+    content.append(&global_actions_group(shell, state, &toasts));
     content.append(&ssh_commands_group(shell, state));
     content.append(&packages_group(shell, state, &toasts));
 
@@ -62,14 +62,18 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 // Global ops
 // ---------------------------------------------------------------------------
 
-fn global_actions_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGroup {
+fn global_actions_group(
+    shell: &MainShell,
+    state: &AppStateRef,
+    toasts: &ToastOverlay,
+) -> PreferencesGroup {
     let group = PreferencesGroup::builder()
         .title("Lifecycle")
         .description("Operations that affect an AUR repository as a whole.")
         .build();
 
     group.add(&register_row(state, toasts));
-    group.add(&import_row(state, toasts));
+    group.add(&import_row(shell, state, toasts));
     group.add(&check_all_row(state, toasts));
     group
 }
@@ -130,7 +134,7 @@ fn register_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
     row
 }
 
-fn import_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
+fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
     let row = ActionRow::builder()
         .title("Import from existing AUR repo")
         .subtitle("Clone an AUR package by name and pre-fill its registry entry.")
@@ -139,12 +143,14 @@ fn import_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
     let btn = primary_button("Import…");
     row.add_suffix(&btn);
 
+    let shell = shell.clone();
     let state = state.clone();
     let toasts = toasts.clone();
     btn.connect_clicked(move |btn| {
         let window = btn.root().and_downcast::<gtk4::Window>();
         let state = state.clone();
         let toasts = toasts.clone();
+        let shell = shell.clone();
         prompt_pkg_name(window.as_ref(), "Import AUR package", move |aur_id| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
                 toasts.add_toast(Toast::new("Set a working directory first."));
@@ -152,6 +158,7 @@ fn import_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
             };
             let toasts = toasts.clone();
             let state = state.clone();
+            let shell = shell.clone();
             runtime::spawn(
                 async move { admin::import_from_aur(&work, &aur_id).await },
                 move |res| match res {
@@ -159,6 +166,7 @@ fn import_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
                         let id = pkg.id.clone();
                         state.borrow_mut().registry.upsert(pkg);
                         let _ = state.borrow().registry.save();
+                        shell.refresh_tab_headers_from_state(&state);
                         toasts.add_toast(Toast::new(&format!("Imported {id}")));
                     }
                     Err(AdminError::NotImplemented(what)) => {
@@ -325,14 +333,11 @@ fn build_row_menu(
         let popover = popover.clone();
         open_dir.connect_clicked(move |_| {
             popover.popdown();
-            let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("Set a working directory first."));
-                return;
-            };
+            let work = state.borrow().config.work_dir.clone();
             let toasts = toasts.clone();
             let pkg = pkg.clone();
             runtime::spawn(
-                async move { admin::open_work_dir(&work, &pkg).await },
+                async move { admin::open_work_dir(work.as_deref(), &pkg).await },
                 move |res| render_admin_result(&toasts, res.map(|_| ()), "Opened"),
             );
         });
@@ -500,4 +505,5 @@ fn prompt_pkg_name(
 
     window.set_default_widget(Some(&ok));
     window.present();
+    ui::input_escape::attach(&window);
 }

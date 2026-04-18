@@ -1,0 +1,11 @@
+# gitleaks configuration — suppress false positives
+# https://github.com/gitleaks/gitleaks#configuration
+
+[allowlist]
+  description = "aur-pkgbuilder false positive suppressions"
+
+  # Generated rustdoc JS can match generic secret rules; not secrets.
+  paths = [
+    '''doc/.*\.js$''',
+    '''target/.*''',
+  ]

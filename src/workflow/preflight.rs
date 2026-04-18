@@ -121,3 +121,32 @@ pub async fn probe_aur_ssh(key: Option<&Path>) -> Result<SshProbe> {
         exit_code,
     })
 }
+
+/// True when an SSH probe to the AUR is expected to be meaningful (explicit
+/// key in config or the conventional `~/.ssh/aur` private key exists).
+pub fn aur_ssh_probe_is_relevant(ssh_key: Option<&Path>) -> bool {
+    if ssh_key.is_some() {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    home.join(".ssh").join("aur").is_file()
+}
+
+/// Whether the Connection tab should show the “healthy” indicator: required
+/// tools on `PATH`, and (when [`aur_ssh_probe_is_relevant`] is true) a
+/// successful non-interactive SSH probe to `aur@aur.archlinux.org`.
+pub async fn connection_tab_healthy(ssh_key: Option<PathBuf>) -> bool {
+    let tools = check_tools().await;
+    if tools.iter().any(|t| t.path.is_none()) {
+        return false;
+    }
+    if !aur_ssh_probe_is_relevant(ssh_key.as_deref()) {
+        return true;
+    }
+    matches!(
+        probe_aur_ssh(ssh_key.as_deref()).await,
+        Ok(SshProbe::Authenticated { .. })
+    )
+}

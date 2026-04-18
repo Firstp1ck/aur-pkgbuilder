@@ -1,29 +1,26 @@
 use std::path::PathBuf;
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup};
+use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::folder_pick;
 use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::preflight::{self, SshProbe, ToolCheck};
 
 /// Whether we should probe AUR SSH immediately on opening this page: the user
 /// has configured a key in the app, or the conventional `~/.ssh/aur` key exists.
-fn ssh_likely_configured(state: &AppStateRef) -> bool {
-    if state.borrow().config.ssh_key.is_some() {
-        return true;
-    }
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
-    home.join(".ssh").join("aur").is_file()
+pub(crate) fn ssh_likely_configured(state: &AppStateRef) -> bool {
+    let key = state.borrow().config.ssh_key.clone();
+    preflight::aur_ssh_probe_is_relevant(key.as_deref())
 }
 
 /// Runs [`preflight::probe_aur_ssh`] and updates `state.ssh_ok` plus the probe row UI.
 fn run_aur_ssh_probe(
+    shell: &MainShell,
     state: &AppStateRef,
     probe_status: &Label,
     probe_spinner: &Spinner,
@@ -35,6 +32,7 @@ fn run_aur_ssh_probe(
     probe_btn.set_sensitive(false);
     let key = state.borrow().config.ssh_key.clone();
     let state2 = state.clone();
+    let shell2 = shell.clone();
     let probe_status = probe_status.clone();
     let probe_spinner = probe_spinner.clone();
     let probe_btn2 = probe_btn.clone();
@@ -46,6 +44,7 @@ fn run_aur_ssh_probe(
             }
         },
         move |result| {
+            let prev_ssh = state2.borrow().ssh_ok;
             probe_spinner.stop();
             probe_btn2.set_sensitive(true);
             match result {
@@ -74,11 +73,15 @@ fn run_aur_ssh_probe(
                     probe_status.set_css_classes(&["error"]);
                 }
             }
+            if prev_ssh != state2.borrow().ssh_ok {
+                shell2.refresh_publish_tab_page(&state2);
+            }
         },
     );
 }
 
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
+    let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(18)
@@ -144,7 +147,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             Some(PathBuf::from(text))
         };
     });
-    paths_group.add(&workdir_row);
 
     let sshkey = {
         let cfg = &state.borrow().config;
@@ -163,6 +165,78 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             Some(PathBuf::from(text))
         };
     });
+
+    let browse_work = Button::builder()
+        .icon_name("folder-open-symbolic")
+        .valign(Align::Center)
+        .tooltip_text("Browse…")
+        .css_classes(["flat"])
+        .build();
+    workdir_row.add_suffix(&browse_work);
+    {
+        let row = workdir_row.clone();
+        let state = state.clone();
+        let toasts = toasts.clone();
+        browse_work.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
+                toasts.add_toast(Toast::new("Could not open folder picker."));
+                return;
+            };
+            let start = path_from_entry_or_config(&row, || state.borrow().config.work_dir.clone());
+            let row = row.clone();
+            let state = state.clone();
+            folder_pick::pick_folder(
+                &parent,
+                "Choose working directory",
+                start.as_deref(),
+                move |picked| {
+                    let Some(path) = picked else {
+                        return;
+                    };
+                    row.set_text(&path.to_string_lossy());
+                    state.borrow_mut().config.work_dir = Some(path);
+                    save_config(&state);
+                },
+            );
+        });
+    }
+
+    let browse_ssh = Button::builder()
+        .icon_name("document-open-symbolic")
+        .valign(Align::Center)
+        .tooltip_text("Browse…")
+        .css_classes(["flat"])
+        .build();
+    ssh_row.add_suffix(&browse_ssh);
+    {
+        let row = ssh_row.clone();
+        let state = state.clone();
+        let toasts = toasts.clone();
+        browse_ssh.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
+                toasts.add_toast(Toast::new("Could not open file picker."));
+                return;
+            };
+            let start = path_from_entry_or_config(&row, || state.borrow().config.ssh_key.clone());
+            let row = row.clone();
+            let state = state.clone();
+            folder_pick::pick_existing_file(
+                &parent,
+                "Choose SSH private key",
+                start.as_deref(),
+                move |picked| {
+                    let Some(path) = picked else {
+                        return;
+                    };
+                    row.set_text(&path.to_string_lossy());
+                    state.borrow_mut().config.ssh_key = Some(path);
+                    save_config(&state);
+                },
+            );
+        });
+    }
+
+    paths_group.add(&workdir_row);
     paths_group.add(&ssh_row);
     content.append(&paths_group);
 
@@ -223,17 +297,24 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     {
+        let shell = shell.clone();
         let state = state.clone();
         let probe_status = probe_status.clone();
         let probe_spinner = probe_spinner.clone();
         let probe_btn_inner = probe_btn.clone();
         probe_btn.connect_clicked(move |_| {
-            run_aur_ssh_probe(&state, &probe_status, &probe_spinner, &probe_btn_inner);
+            run_aur_ssh_probe(
+                &shell,
+                &state,
+                &probe_status,
+                &probe_spinner,
+                &probe_btn_inner,
+            );
         });
     }
 
     if ssh_likely_configured(state) {
-        run_aur_ssh_probe(state, &probe_status, &probe_spinner, &probe_btn);
+        run_aur_ssh_probe(shell, state, &probe_status, &probe_spinner, &probe_btn);
     }
 
     {
@@ -246,7 +327,22 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
     content.append(&continue_btn);
 
-    ui::home::wrap_page("AUR connection", &content)
+    toasts.set_child(Some(&content));
+    ui::home::wrap_page("AUR connection", &toasts)
+}
+
+/// Uses the entry text when non-empty; otherwise the closure (typically config).
+fn path_from_entry_or_config(
+    row: &EntryRow,
+    fallback: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    let s = row.text();
+    let trimmed = s.as_str().trim();
+    if trimmed.is_empty() {
+        fallback()
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
 }
 
 fn save_config(state: &AppStateRef) {

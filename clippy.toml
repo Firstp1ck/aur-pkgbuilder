@@ -1,0 +1,8 @@
+# Clippy configuration for aur-pkgbuilder
+# See https://doc.rust-lang.org/nightly/clippy/lint_configuration.html
+
+# Cognitive complexity threshold (matches AGENTS.md review bar)
+cognitive-complexity-threshold = 25
+
+# Too many lines threshold (matches AGENTS.md function length guidance)
+too-many-lines-threshold = 150

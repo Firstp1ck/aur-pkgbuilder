@@ -1,26 +1,41 @@
 //! In-app PKGBUILD editor: quick metadata rows plus a full-text buffer, wired
 //! to the working-directory `PKGBUILD` via [`crate::workflow::pkgbuild_edit`].
 
-use std::path::PathBuf;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
 use adw::{ActionRow, Banner, EntryRow, ExpanderRow, PreferencesGroup, Toast, ToastOverlay};
+use glib::source::{SourceId, timeout_add_local_once};
 use gtk4::{
     Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer,
-    TextView, WrapMode,
+    TextTag, TextView, WrapMode,
 };
 
 use crate::runtime;
 use crate::state::AppStateRef;
+use crate::ui::pkgbuild_stale;
+use crate::ui::shell::MainShell;
 use crate::workflow::build as build_wf;
 use crate::workflow::package::PackageDef;
+use crate::workflow::pkgbuild_diff::diff_pkgbuild_lines;
 use crate::workflow::pkgbuild_edit::{self, PkgbuildQuickFields};
 use crate::workflow::sync;
+
+const DIFF_TAG_INSERT: &str = "pkg-diff-insert";
+const DIFF_TAG_REMOVED_PREVIEW: &str = "pkg-diff-removed-preview";
+const REMOVED_PREVIEW_MAX_LINES: usize = 120;
 
 /// Shared quick-field rows and the PKGBUILD text buffer.
 struct EditorState {
     buffer: TextBuffer,
+    /// Snapshot used for git-style line highlights (last successful load or save).
+    baseline: RefCell<String>,
+    diff_inhibit: Cell<bool>,
+    diff_debounce: RefCell<Option<SourceId>>,
+    diff_removed_bar: GtkBox,
+    diff_removed_buf: TextBuffer,
     maintainer: EntryRow,
     pkgname: EntryRow,
     pkgver: EntryRow,
@@ -29,7 +44,6 @@ struct EditorState {
     arch: EntryRow,
     url: EntryRow,
     license: EntryRow,
-    options: EntryRow,
     depends: EntryRow,
     makedepends: EntryRow,
     conflicts: EntryRow,
@@ -38,9 +52,14 @@ struct EditorState {
 }
 
 impl EditorState {
-    fn new(pkg: &PackageDef) -> Rc<Self> {
+    fn new(pkg: &PackageDef, diff_removed_bar: GtkBox, diff_removed_buf: TextBuffer) -> Rc<Self> {
         Rc::new(Self {
             buffer: TextBuffer::new(None),
+            baseline: RefCell::new(String::new()),
+            diff_inhibit: Cell::new(false),
+            diff_debounce: RefCell::new(None),
+            diff_removed_bar,
+            diff_removed_buf,
             maintainer: entry("Maintainer — # Maintainer: … (name <email>)"),
             pkgname: entry(&format!("pkgname — should match AUR id “{}”", pkg.id)),
             pkgver: entry("pkgver — upstream version"),
@@ -49,7 +68,6 @@ impl EditorState {
             arch: entry("arch — space-separated tokens → array"),
             url: entry("url — upstream / project URL"),
             license: entry("license — space-separated → array"),
-            options: entry("options — space-separated (e.g. !strip)"),
             depends: entry("depends — space-separated package names"),
             makedepends: entry("makedepends — build deps, space-separated"),
             conflicts: entry("conflicts — space-separated"),
@@ -82,9 +100,6 @@ impl EditorState {
         }
         if let Some(v) = &fields.license_tokens {
             self.license.set_text(v);
-        }
-        if let Some(v) = &fields.options_tokens {
-            self.options.set_text(v);
         }
         if let Some(v) = &fields.depends_tokens {
             self.depends.set_text(v);
@@ -122,7 +137,6 @@ impl EditorState {
             arch_tokens: t(&self.arch),
             url: t(&self.url),
             license_tokens: t(&self.license),
-            options_tokens: t(&self.options),
             depends_tokens: t(&self.depends),
             makedepends_tokens: t(&self.makedepends),
             conflicts_tokens: t(&self.conflicts),
@@ -137,9 +151,130 @@ impl EditorState {
         self.buffer.text(&start, &end, false).to_string()
     }
 
-    fn set_full_text(&self, s: &str) {
-        self.buffer.set_text(s);
+    /// Replace buffer text and refresh the diff baseline (after load / initial template).
+    fn replace_buffer_and_baseline(self: &Rc<Self>, text: &str) {
+        self.cancel_diff_debounce();
+        self.diff_inhibit.set(true);
+        self.baseline.replace(text.to_string());
+        self.buffer.set_text(text);
+        self.diff_inhibit.set(false);
+        self.run_line_diff_highlights();
     }
+
+    /// Replace buffer text but keep the baseline (e.g. “Apply quick fields”).
+    fn replace_buffer_preserving_baseline(self: &Rc<Self>, text: &str) {
+        self.cancel_diff_debounce();
+        self.diff_inhibit.set(true);
+        self.buffer.set_text(text);
+        self.diff_inhibit.set(false);
+        self.run_line_diff_highlights();
+    }
+
+    fn cancel_diff_debounce(&self) {
+        if let Some(id) = self.diff_debounce.borrow_mut().take() {
+            id.remove();
+        }
+    }
+
+    fn bind_diff_refresh(self: &Rc<Self>) {
+        let s = self.clone();
+        self.buffer.connect_changed(move |_| {
+            if s.diff_inhibit.get() {
+                return;
+            }
+            s.schedule_diff_refresh();
+        });
+    }
+
+    fn schedule_diff_refresh(self: &Rc<Self>) {
+        self.cancel_diff_debounce();
+        let s = self.clone();
+        let id = timeout_add_local_once(Duration::from_millis(200), move || {
+            s.diff_debounce.borrow_mut().take();
+            s.run_line_diff_highlights();
+        });
+        *self.diff_debounce.borrow_mut() = Some(id);
+    }
+
+    fn run_line_diff_highlights(&self) {
+        self.diff_inhibit.set(true);
+        let baseline = self.baseline.borrow();
+        let diff = diff_pkgbuild_lines(&baseline, &self.full_text());
+        drop(baseline);
+
+        ensure_main_diff_insert_tag(&self.buffer);
+        let buf_start = self.buffer.start_iter();
+        let buf_end = self.buffer.end_iter();
+        if let Some(tag) = self.buffer.tag_table().lookup(DIFF_TAG_INSERT) {
+            self.buffer.remove_tag(&tag, &buf_start, &buf_end);
+        }
+        if let Some(tag) = self.buffer.tag_table().lookup(DIFF_TAG_INSERT) {
+            for &line in &diff.inserted_lines {
+                let Ok(line_i) = i32::try_from(line) else {
+                    continue;
+                };
+                if line_i < 0 || line_i >= self.buffer.line_count() {
+                    continue;
+                }
+                let Some(start) = self.buffer.iter_at_line(line_i) else {
+                    continue;
+                };
+                let mut end = start;
+                if !end.forward_line() {
+                    end = self.buffer.end_iter();
+                }
+                self.buffer.apply_tag(&tag, &start, &end);
+            }
+        }
+
+        self.diff_removed_bar
+            .set_visible(!diff.removed_lines.is_empty());
+        fill_removed_preview(&self.diff_removed_buf, &diff.removed_lines);
+
+        self.diff_inhibit.set(false);
+    }
+}
+
+fn ensure_main_diff_insert_tag(buffer: &TextBuffer) {
+    let table = buffer.tag_table();
+    if table.lookup(DIFF_TAG_INSERT).is_none() {
+        let tag = TextTag::builder()
+            .name(DIFF_TAG_INSERT)
+            .paragraph_background("#c8e6c9")
+            .build();
+        table.add(&tag);
+    }
+}
+
+fn ensure_removed_preview_tag(buffer: &TextBuffer) {
+    let table = buffer.tag_table();
+    if table.lookup(DIFF_TAG_REMOVED_PREVIEW).is_none() {
+        let tag = TextTag::builder()
+            .name(DIFF_TAG_REMOVED_PREVIEW)
+            .paragraph_background("#ffcdd2")
+            .build();
+        table.add(&tag);
+    }
+}
+
+fn fill_removed_preview(buf: &TextBuffer, lines: &[String]) {
+    ensure_removed_preview_tag(buf);
+    let (slice, truncated) = if lines.len() > REMOVED_PREVIEW_MAX_LINES {
+        (&lines[..REMOVED_PREVIEW_MAX_LINES], true)
+    } else {
+        (lines, false)
+    };
+    let mut body = slice.join("\n");
+    if truncated {
+        body.push_str("\n… (more removed lines not shown)");
+    }
+    buf.set_text(&body);
+    let Some(tag) = buf.tag_table().lookup(DIFF_TAG_REMOVED_PREVIEW) else {
+        return;
+    };
+    let s = buf.start_iter();
+    let e = buf.end_iter();
+    buf.apply_tag(&tag, &s, &e);
 }
 
 fn entry(title: &str) -> EntryRow {
@@ -155,7 +290,6 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
     exp.add_row(&st.arch);
     exp.add_row(&st.url);
     exp.add_row(&st.license);
-    exp.add_row(&st.options);
     exp.add_row(&st.depends);
     exp.add_row(&st.makedepends);
     exp.add_row(&st.conflicts);
@@ -171,10 +305,16 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
 ///
 /// Output:
 /// - A [`PreferencesGroup`] ready to append into the Version page.
+///
+/// Details:
+/// - `stale_banner` lives on the Version page; Reload updates it after
+///   [`crate::workflow::package::record_pkgbuild_refresh`].
 pub fn build_section(
+    shell: &MainShell,
     state: &AppStateRef,
     pkg: &PackageDef,
     toasts: &ToastOverlay,
+    stale_banner: &Banner,
 ) -> PreferencesGroup {
     let group = PreferencesGroup::builder()
         .title("Edit PKGBUILD")
@@ -182,21 +322,23 @@ pub fn build_section(
             "Reload loads the file from disk into the editor. Save writes the buffer. \
              “Apply quick fields” merges the rows above into the full text (single-line \
              assignments only — review the buffer afterward). Edit functions such as \
-             prepare(), build(), and package() in the full editor.",
+             prepare(), build(), and package() in the full editor. \
+             Green highlights mark new lines vs the last load/save; removed lines appear in the red panel.",
         )
         .build();
 
     let work = state.borrow().config.work_dir.clone();
-    let dir = work
+    let dir = sync::package_dir(work.as_deref(), pkg);
+    let path_display = dir
         .as_ref()
-        .map(|w| sync::package_dir(w, pkg))
-        .unwrap_or_else(|| PathBuf::from("."));
-    let path = dir.join("PKGBUILD");
-    let path_display = path.display().to_string();
+        .map(|d| d.join("PKGBUILD").display().to_string())
+        .unwrap_or_else(|| sync::destination_help_line(work.as_deref(), pkg));
 
     let banner = Banner::builder()
-        .title("Set a working directory on the Connection tab before editing.")
-        .revealed(work.is_none())
+        .title(
+            "Pick a destination folder on the Sync tab, or set a working directory on Connection.",
+        )
+        .revealed(dir.is_none())
         .build();
     group.add(&banner);
 
@@ -236,7 +378,44 @@ pub fn build_section(
     path_row.add_suffix(&btn_row);
     group.add(&path_row);
 
-    let st = EditorState::new(pkg);
+    let diff_removed_buf = TextBuffer::new(None);
+    let removed_view = TextView::builder()
+        .buffer(&diff_removed_buf)
+        .monospace(true)
+        .wrap_mode(WrapMode::None)
+        .editable(false)
+        .cursor_visible(false)
+        .accepts_tab(false)
+        .top_margin(6)
+        .bottom_margin(6)
+        .left_margin(8)
+        .right_margin(8)
+        .vexpand(false)
+        .build();
+    let removed_scroll = ScrolledWindow::builder()
+        .child(&removed_view)
+        .vexpand(false)
+        .hexpand(true)
+        .min_content_height(120)
+        .build();
+    removed_scroll.set_policy(PolicyType::Automatic, PolicyType::Automatic);
+
+    let diff_removed_bar = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(4)
+        .margin_top(4)
+        .visible(false)
+        .build();
+    let removed_caption = Label::builder()
+        .label("Removed lines vs last load/save (like git −)")
+        .halign(Align::Start)
+        .css_classes(["dim-label"])
+        .build();
+    diff_removed_bar.append(&removed_caption);
+    diff_removed_bar.append(&removed_scroll);
+
+    let st = EditorState::new(pkg, diff_removed_bar.clone(), diff_removed_buf);
+    st.bind_diff_refresh();
 
     let expander = ExpanderRow::builder()
         .title("Quick metadata")
@@ -253,6 +432,7 @@ pub fn build_section(
         .css_classes(["title-4"])
         .build();
     group.add(&full_label);
+    group.add(&diff_removed_bar);
 
     let view = TextView::builder()
         .buffer(&st.buffer)
@@ -268,29 +448,43 @@ pub fn build_section(
         .child(&view)
         .vexpand(true)
         .hexpand(true)
-        .min_content_height(260)
+        // Taller default so the full PKGBUILD is usable without constant scrolling.
+        .min_content_height(520)
         .build();
     scroll.set_policy(PolicyType::Automatic, PolicyType::Automatic);
     group.add(&scroll);
 
     let toasts_r = toasts.clone();
     let state_r = state.clone();
+    let shell_reload = shell.clone();
     let st_reload = st.clone();
-    let dir_reload = dir.clone();
+    let stale_reload = stale_banner.clone();
     reload.connect_clicked(move |_| {
-        if state_r.borrow().config.work_dir.is_none() {
-            toasts_r.add_toast(Toast::new("Set a working directory first."));
+        let stale_for_cb = stale_reload.clone();
+        let pkg = state_r.borrow().package().clone();
+        let work = state_r.borrow().config.work_dir.clone();
+        let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+            toasts_r.add_toast(Toast::new(
+                "Set a working directory on Connection or pick a destination folder on Sync.",
+            ));
             return;
-        }
-        let dir = dir_reload.clone();
+        };
         let st = st_reload.clone();
         let toasts = toasts_r.clone();
+        let state_cb = state_r.clone();
+        let shell_cb = shell_reload.clone();
         runtime::spawn(
             async move { pkgbuild_edit::read_pkgbuild(&dir).await },
             move |res| match res {
                 Ok(s) => {
-                    st.set_full_text(&s);
+                    st.replace_buffer_and_baseline(&s);
                     st.populate_quick(&pkgbuild_edit::parse_quick_fields(&s));
+                    crate::workflow::package::record_pkgbuild_refresh(&state_cb);
+                    pkgbuild_stale::banner_set_pkgbuild_stale(
+                        &stale_for_cb,
+                        state_cb.borrow().package(),
+                    );
+                    shell_cb.notify_pkgbuild_reloaded_from_disk(&state_cb);
                     toasts.add_toast(Toast::new("PKGBUILD loaded"));
                 }
                 Err(e) => toasts.add_toast(Toast::new(&format!("{e}"))),
@@ -300,20 +494,31 @@ pub fn build_section(
 
     let toasts_s = toasts.clone();
     let state_s = state.clone();
+    let shell_save = shell.clone();
     let st_save = st.clone();
-    let dir_save = dir.clone();
     save.connect_clicked(move |_| {
-        if state_s.borrow().config.work_dir.is_none() {
-            toasts_s.add_toast(Toast::new("Set a working directory first."));
+        let pkg = state_s.borrow().package().clone();
+        let work = state_s.borrow().config.work_dir.clone();
+        let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+            toasts_s.add_toast(Toast::new(
+                "Set a working directory on Connection or pick a destination folder on Sync.",
+            ));
             return;
-        }
+        };
         let text = st_save.full_text();
-        let dir = dir_save.clone();
+        let st = st_save.clone();
         let toasts = toasts_s.clone();
+        let state_cb = state_s.clone();
+        let shell_cb = shell_save.clone();
         runtime::spawn(
             async move { pkgbuild_edit::write_pkgbuild(&dir, &text).await },
             move |res| match res {
-                Ok(()) => toasts.add_toast(Toast::new("PKGBUILD saved")),
+                Ok(()) => {
+                    st.baseline.replace(st.full_text());
+                    st.run_line_diff_highlights();
+                    shell_cb.notify_pkgbuild_saved(&state_cb);
+                    toasts.add_toast(Toast::new("PKGBUILD saved"));
+                }
                 Err(e) => toasts.add_toast(Toast::new(&format!("{e}"))),
             },
         );
@@ -324,7 +529,7 @@ pub fn build_section(
     apply.connect_clicked(move |_| {
         let merged =
             pkgbuild_edit::merge_quick_fields(&st_apply.full_text(), &st_apply.collect_quick());
-        st_apply.set_full_text(&merged);
+        st_apply.replace_buffer_preserving_baseline(&merged);
         toasts_a.add_toast(Toast::new(
             "Quick fields merged into the editor — review the full text, then Save.",
         ));
@@ -332,13 +537,15 @@ pub fn build_section(
 
     let toasts_i = toasts.clone();
     let state_i = state.clone();
-    let dir_si = dir.clone();
     srcinfo.connect_clicked(move |_| {
-        if state_i.borrow().config.work_dir.is_none() {
-            toasts_i.add_toast(Toast::new("Set a working directory first."));
+        let pkg = state_i.borrow().package().clone();
+        let work = state_i.borrow().config.work_dir.clone();
+        let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
+            toasts_i.add_toast(Toast::new(
+                "Set a working directory on Connection or pick a destination folder on Sync.",
+            ));
             return;
-        }
-        let dir = dir_si.clone();
+        };
         let toasts = toasts_i.clone();
         runtime::spawn(
             async move { build_wf::write_srcinfo_silent(&dir).await },
@@ -349,27 +556,33 @@ pub fn build_section(
         );
     });
 
-    if work.is_some() {
-        let dir_i = dir.clone();
+    if let Some(dir_i) = dir.clone() {
         let st_i = st.clone();
         let toasts_i = toasts.clone();
+        let state_i = state.clone();
+        let shell_i = shell.clone();
         runtime::spawn(
             async move { pkgbuild_edit::read_pkgbuild(&dir_i).await },
             move |res| match res {
                 Ok(s) => {
-                    st_i.set_full_text(&s);
+                    st_i.replace_buffer_and_baseline(&s);
                     st_i.populate_quick(&pkgbuild_edit::parse_quick_fields(&s));
+                    shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
                 }
                 Err(_) => {
-                    st_i.set_full_text(
+                    st_i.replace_buffer_and_baseline(
                         "# No PKGBUILD on disk yet — use the Sync tab to download one, or paste here and Save.\n",
                     );
+                    shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
                     toasts_i.add_toast(Toast::new("No PKGBUILD on disk yet"));
                 }
             },
         );
     } else {
-        st.set_full_text("# Set a working directory on the Connection tab.\n");
+        st.replace_buffer_and_baseline(
+            "# Pick a destination folder on the Sync tab, or set a working directory on Connection.\n",
+        );
+        shell.notify_pkgbuild_reloaded_from_disk(state);
     }
 
     group

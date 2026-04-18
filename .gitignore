@@ -27,6 +27,8 @@ target/
 # Output of dev/scripts/*
 dev/scripts/Modules/*
 clippy_errors.txt
+clippy_cognitive_complexity_report.txt
+complexity_report.txt
 
 # Python bytecode (from occasional helper scripts)
 *.pyc

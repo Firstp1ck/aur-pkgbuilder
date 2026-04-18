@@ -1,5 +1,7 @@
 //! Generic model for a package the app can build and publish.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde::{Deserialize, Serialize};
 
 /// Broad category used only to tailor UI copy / default hints. It does not
@@ -52,11 +54,65 @@ pub struct PackageDef {
     /// Optional freedesktop icon name override.
     #[serde(default)]
     pub icon_name: Option<String>,
-    /// Directory under [`crate::config::Config::work_dir`] where this package’s
-    /// PKGBUILD and build tree live. Must be a safe relative path (no `..`).
-    /// Empty / missing means `<work_dir>/<id>/` (same as `id`).
+    /// Absolute path to the folder that holds this package’s PKGBUILD and build
+    /// tree. When unset, the app uses [`crate::config::Config::work_dir`] plus
+    /// [`Self::sync_subdir`] or [`Self::id`].
+    #[serde(default)]
+    pub destination_dir: Option<String>,
+    /// Legacy relative folder under [`crate::config::Config::work_dir`]. Ignored
+    /// when [`Self::destination_dir`] is set.
     #[serde(default)]
     pub sync_subdir: Option<String>,
+    /// Unix seconds when the PKGBUILD was last **downloaded** (Sync) or **Reload**ed
+    /// from disk on the Version tab — not updated on Save or passive editor load.
+    #[serde(default)]
+    pub pkgbuild_refreshed_at_unix: Option<i64>,
+}
+
+/// Age after which the Version tab warns that the PKGBUILD may be stale.
+pub const PKGBUILD_STALE_SECS: i64 = 86400;
+
+/// Best-effort wall clock in Unix seconds (for staleness checks).
+pub fn pkgbuild_refresh_clock_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// What: User-facing stale warning for the Version tab.
+///
+/// Inputs:
+/// - `last`: Last recorded download / Reload time, if any.
+/// - `now_unix`: Current time in Unix seconds (inject in tests).
+///
+/// Output:
+/// - `Some(message)` when the tree should be refreshed; `None` when no warning.
+pub fn pkgbuild_stale_message(last: Option<i64>, now_unix: i64) -> Option<&'static str> {
+    match last {
+        None => Some(
+            "No PKGBUILD download or Reload from disk is recorded yet for this package. \
+             Use Sync or Reload before trusting this tree.",
+        ),
+        Some(ts) if now_unix.saturating_sub(ts) >= PKGBUILD_STALE_SECS => Some(
+            "The PKGBUILD was last downloaded or reloaded from disk over a day ago. \
+             Sync or Reload so you are not editing an outdated file.",
+        ),
+        _ => None,
+    }
+}
+
+/// Records that the current package’s PKGBUILD was refreshed from upstream or disk.
+pub fn record_pkgbuild_refresh(state: &crate::state::AppStateRef) {
+    let now = pkgbuild_refresh_clock_now();
+    let mut st = state.borrow_mut();
+    let Some(ref mut pkg) = st.package else {
+        return;
+    };
+    pkg.pkgbuild_refreshed_at_unix = Some(now);
+    let snapshot = pkg.clone();
+    st.registry.upsert(snapshot);
+    let _ = st.registry.save();
 }
 
 impl PackageDef {
@@ -75,5 +131,27 @@ impl PackageDef {
             PackageKind::Git => "folder-remote-symbolic",
             PackageKind::Other => "application-x-addon-symbolic",
         }
+    }
+}
+
+#[cfg(test)]
+mod pkgbuild_stale_tests {
+    use super::*;
+
+    #[test]
+    fn missing_timestamp_warns() {
+        assert!(pkgbuild_stale_message(None, 1_700_000_000).is_some());
+    }
+
+    #[test]
+    fn within_day_no_warn() {
+        let t = 1_700_000_000;
+        assert!(pkgbuild_stale_message(Some(t), t + PKGBUILD_STALE_SECS - 1).is_none());
+    }
+
+    #[test]
+    fn day_or_older_warns() {
+        let t = 1_700_000_000;
+        assert!(pkgbuild_stale_message(Some(t), t + PKGBUILD_STALE_SECS).is_some());
     }
 }

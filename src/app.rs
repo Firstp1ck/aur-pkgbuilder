@@ -36,6 +36,7 @@ pub fn build(app: &Application) {
         .content(&nav)
         .build();
     window.present();
+    ui::input_escape::attach(&window);
 
     // First-launch onboarding: no saved AUR username and no registered
     // packages means the user has never completed the import flow.
@@ -44,7 +45,7 @@ pub fn build(app: &Application) {
         st.config.aur_username.is_none() && st.registry.packages.is_empty()
     };
     if needs_onboarding {
-        let page = ui::onboarding::build(&shell.nav(), &state);
+        let page = ui::onboarding::build(&shell, &state);
         shell.nav().push(&page);
     }
     // Tab signal handlers clone this handle; drop the local strong ref explicitly.

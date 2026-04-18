@@ -1,30 +1,54 @@
-use std::path::PathBuf;
-
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
+use crate::ui::folder_pick;
 use crate::ui::shell::{MainShell, ProcessTab};
+use crate::workflow::package;
 use crate::workflow::package::PackageDef;
 use crate::workflow::sync as sync_wf;
 
-fn pkgbuild_path(work: &std::path::Path, pkg: &PackageDef) -> PathBuf {
-    sync_wf::package_dir(work, pkg).join("PKGBUILD")
+fn pkgbuild_path(work: Option<&std::path::Path>, pkg: &PackageDef) -> Option<std::path::PathBuf> {
+    sync_wf::package_dir(work, pkg).map(|d| d.join("PKGBUILD"))
 }
 
-fn set_target_subtitle(
-    target_row: &ActionRow,
-    work: &Option<std::path::PathBuf>,
-    pkg: &PackageDef,
-) {
-    let subtitle = work
-        .as_ref()
-        .map(|w| pkgbuild_path(w, pkg).display().to_string())
-        .unwrap_or_else(|| "(no working directory set)".into());
-    target_row.set_subtitle(&subtitle);
+fn set_destination_row(row: &ActionRow, work: Option<&std::path::Path>, pkg: &PackageDef) {
+    let subtitle = if let Some(pb) = pkgbuild_path(work, pkg) {
+        pb.display().to_string()
+    } else {
+        sync_wf::destination_help_line(work, pkg)
+    };
+    row.set_subtitle(&subtitle);
+}
+
+fn persist_destination(
+    state: &AppStateRef,
+    updated: PackageDef,
+    toasts: &ToastOverlay,
+    dest_row: &ActionRow,
+) -> bool {
+    {
+        let mut st = state.borrow_mut();
+        st.registry.upsert(updated.clone());
+        if let Some(ref mut p) = st.package
+            && p.id == updated.id
+        {
+            *p = updated.clone();
+        }
+        if let Err(e) = st.registry.save() {
+            toasts.add_toast(Toast::new(&format!("Could not save registry: {e}")));
+            return false;
+        }
+    }
+    set_destination_row(
+        dest_row,
+        state.borrow().config.work_dir.as_deref(),
+        &updated,
+    );
+    true
 }
 
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
@@ -47,7 +71,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(format!(
-            "Download the PKGBUILD for {} from its configured source into the folder below.",
+            "Download the PKGBUILD for {} from its configured source into the destination folder.",
             pkg.id
         ))
         .halign(Align::Start)
@@ -67,28 +91,31 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     let work = state.borrow().config.work_dir.clone();
 
-    let folder_row = EntryRow::builder()
-        .title("Folder — relative to working dir (blank = package id; e.g. my-group/pkg)")
+    let dest_row = ActionRow::builder()
+        .title("Destination (PKGBUILD path)")
         .build();
-    folder_row.set_text(pkg.sync_subdir.as_deref().unwrap_or(""));
+    set_destination_row(&dest_row, work.as_deref(), &pkg);
 
-    let save_folder_btn = Button::builder()
-        .label("Save folder")
+    let browse_btn = Button::builder()
+        .label("Browse…")
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
-    let folder_actions = GtkBox::builder()
+    let default_btn = Button::builder()
+        .label("Use default")
+        .valign(Align::Center)
+        .css_classes(vec!["flat"])
+        .tooltip_text("Clear the saved folder — use working directory + package id (or legacy relative path).")
+        .build();
+    let dest_actions = GtkBox::builder()
         .orientation(Orientation::Horizontal)
         .spacing(8)
         .halign(Align::End)
         .build();
-    folder_actions.append(&save_folder_btn);
-    folder_row.add_suffix(&folder_actions);
-    group.add(&folder_row);
-
-    let target_row = ActionRow::builder().title("Destination (PKGBUILD)").build();
-    set_target_subtitle(&target_row, &work, &pkg);
-    group.add(&target_row);
+    dest_actions.append(&browse_btn);
+    dest_actions.append(&default_btn);
+    dest_row.add_suffix(&dest_actions);
+    group.add(&dest_row);
     content.append(&group);
 
     let status = Label::builder().halign(Align::Start).build();
@@ -117,47 +144,53 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     {
         let state = state.clone();
-        let folder_row = folder_row.clone();
-        let target_row = target_row.clone();
+        let dest_row = dest_row.clone();
         let toasts = toasts.clone();
-        save_folder_btn.connect_clicked(move |_| {
-            let raw = folder_row.text().to_string();
-            if sync_wf::validate_sync_subdir(&raw).is_err() {
-                folder_row.add_css_class("error");
-                toasts.add_toast(Toast::new(
-                    "Invalid folder: use a relative path under the working directory (no ..).",
-                ));
+        browse_btn.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
+                toasts.add_toast(Toast::new("Could not open folder picker."));
                 return;
-            }
-            folder_row.remove_css_class("error");
-            let sync_subdir = {
-                let t = raw.trim();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t.to_string())
-                }
             };
-            let mut updated = {
-                let st = state.borrow();
-                st.package().clone()
-            };
-            updated.sync_subdir = sync_subdir;
-            {
-                let mut st = state.borrow_mut();
-                st.registry.upsert(updated.clone());
-                if let Some(ref mut p) = st.package
-                    && p.id == updated.id
-                {
-                    *p = updated.clone();
+            let work_ref = state.borrow().config.work_dir.clone();
+            let pkg_now = state.borrow().package().clone();
+            let start = sync_wf::package_dir(work_ref.as_deref(), &pkg_now);
+            let state = state.clone();
+            let dest_row = dest_row.clone();
+            let toasts = toasts.clone();
+            folder_pick::pick_folder(&parent, "Choose destination folder", start.as_deref(), {
+                move |picked| {
+                    let Some(path) = picked else {
+                        return;
+                    };
+                    let path_str = path.to_string_lossy().into_owned();
+                    if sync_wf::validate_destination_path_str(&path_str).is_err() {
+                        toasts.add_toast(Toast::new(
+                            "That folder path is not usable — pick an absolute path without ..",
+                        ));
+                        return;
+                    }
+                    let mut updated = state.borrow().package().clone();
+                    updated.destination_dir = Some(path_str);
+                    updated.sync_subdir = None;
+                    if persist_destination(&state, updated, &toasts, &dest_row) {
+                        toasts.add_toast(Toast::new("Destination saved"));
+                    }
                 }
-                if let Err(e) = st.registry.save() {
-                    toasts.add_toast(Toast::new(&format!("Could not save registry: {e}")));
-                    return;
-                }
+            });
+        });
+    }
+
+    {
+        let state = state.clone();
+        let dest_row = dest_row.clone();
+        let toasts = toasts.clone();
+        default_btn.connect_clicked(move |_| {
+            let mut updated = state.borrow().package().clone();
+            updated.destination_dir = None;
+            updated.sync_subdir = None;
+            if persist_destination(&state, updated, &toasts, &dest_row) {
+                toasts.add_toast(Toast::new("Using default destination"));
             }
-            set_target_subtitle(&target_row, &state.borrow().config.work_dir, &updated);
-            toasts.add_toast(Toast::new("Destination folder saved"));
         });
     }
 
@@ -168,12 +201,16 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let download_btn_inner = download_btn.clone();
         let continue_btn = continue_btn.clone();
         let toasts = toasts.clone();
+        let shell_for_download = shell.clone();
         download_btn.connect_clicked(move |_| {
-            let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("Set a working directory first."));
+            let work = state.borrow().config.work_dir.clone();
+            let pkg = state.borrow().package().clone();
+            let Some(_dir) = sync_wf::package_dir(work.as_deref(), &pkg) else {
+                toasts.add_toast(Toast::new(
+                    "Set a working directory on Connection or browse for a destination folder.",
+                ));
                 return;
             };
-            let pkg = state.borrow().package().clone();
             spinner.start();
             status.set_text("downloading…");
             download_btn_inner.set_sensitive(false);
@@ -185,9 +222,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let continue_btn = continue_btn.clone();
             let toasts = toasts.clone();
             let url = pkg.pkgbuild_url.clone();
+            let shell_dl = shell_for_download.clone();
             runtime::spawn(
                 async move {
-                    sync_wf::download_pkgbuild(&work, &pkg, &url)
+                    sync_wf::download_pkgbuild(work.as_deref(), &pkg, &url)
                         .await
                         .map_err(|e| e.to_string())
                 },
@@ -198,6 +236,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                         Ok(path) => {
                             status.set_text(&format!("saved to {}", path.display()));
                             state2.borrow_mut().pkgbuild_path = Some(path);
+                            package::record_pkgbuild_refresh(&state2);
+                            shell_dl.refresh_version_tab_page(&state2);
                             continue_btn.set_sensitive(true);
                             toasts.add_toast(Toast::new("PKGBUILD downloaded"));
                         }

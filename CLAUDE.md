@@ -5,9 +5,10 @@ desktop app that drives an AUR maintainer's release flow).
 
 ## When Creating New Code (Files, Functions, Methods, Enums)
 
-- Keep **cognitive complexity** below **25**. There is no lint rule
-  enforcing this yet, but it is the review bar — match the shape of
-  existing modules such as `workflow::ssh_setup` or `workflow::validate`.
+- Keep **cognitive complexity** below **25**. `clippy::cognitive_complexity`
+  is enabled at **warn** (see `Cargo.toml` / `clippy.toml`); treat `-D warnings`
+  runs as enforcing the bar — match the shape of existing modules such as
+  `workflow::ssh_setup` or `workflow::validate`.
 - Keep functions under **150 lines**. Split at natural seams — `fn
   build(nav, state)` in `src/ui/*.rs` should delegate to small
   `fn *_group(…) -> PreferencesGroup` helpers, not inline everything.
@@ -35,10 +36,11 @@ desktop app that drives an AUR maintainer's release flow).
 
 Run from the repository root, in this order:
 
-1. `cargo fmt --all`
-2. `cargo clippy --all-targets -- -D warnings`
+1. `cargo fmt --all` (uses `rustfmt.toml`)
+2. `cargo clippy --all-targets --all-features -- -D warnings` (uses `clippy.toml`)
 3. `cargo check`
 4. `cargo test --bin aur-pkgbuilder`
+5. `cargo deny check` (uses `deny.toml`; optional locally if `cargo-deny` is not installed)
 
 `cargo test --bin aur-pkgbuilder` is required because the crate has no
 `lib` target — the plain `cargo test` command will error with "no
@@ -46,9 +48,18 @@ library targets found".
 
 ## Lint configuration (source of truth)
 
-Currently only `-D warnings` is enforced on the command line. There is
-no `[lints.clippy]` section in `Cargo.toml` and no `clippy.toml`. When
-adding lint configuration, document it here and keep this file in sync.
+- **Clippy:** `clippy.toml` sets `cognitive-complexity-threshold` and
+  `too-many-lines-threshold`. `[lints.clippy]` in `Cargo.toml` enables
+  `cognitive_complexity = "warn"`. CI/agents run
+  `cargo clippy --all-targets --all-features -- -D warnings`.
+- **rustfmt:** `rustfmt.toml` at the repo root.
+- **Dependencies / licenses:** `deny.toml` for `cargo deny check`.
+- **Secrets:** `.gitleaks.toml` for `gitleaks detect`.
+- **Shortcuts:** root `Makefile` delegates to `dev/Makefile` (`make fmt`,
+  `make clippy`, `make test`, `make pre-commit`, …).
+
+When changing any of the above, update this section and keep `AGENTS.md`
+in sync.
 
 ## Code Quality Requirements
 
@@ -57,7 +68,7 @@ adding lint configuration, document it here and keep this file in sync.
 Before completing any task, ensure all of the following pass:
 
 1. **Format:** `cargo fmt --all` produces no diff.
-2. **Clippy:** `cargo clippy --all-targets -- -D warnings` is clean.
+2. **Clippy:** `cargo clippy --all-targets --all-features -- -D warnings` is clean.
 3. **Compile:** `cargo check` succeeds.
 4. **Tests:** `cargo test --bin aur-pkgbuilder` — all tests pass.
 5. **Complexity:** new functions stay under ~25 cognitive complexity.
@@ -65,6 +76,8 @@ Before completing any task, ensure all of the following pass:
 7. **Exceptions:** if a threshold cannot reasonably be met, add a
    **documented** `#[allow(...)]` with a justification comment. Use
    sparingly.
+8. **cargo-deny:** `cargo deny check` passes when using `make pre-commit`
+   (install `cargo-deny` if needed).
 
 ### Documentation
 
@@ -289,9 +302,10 @@ shell, and a push-access remote.
 
 | Concern | Enforcement | Threshold |
 |---------|-------------|-----------|
-| Cognitive complexity | manual review (no lint yet) | 25 |
-| Function length | manual review (no lint yet) | 150 lines |
+| Cognitive complexity | `clippy::cognitive_complexity` + `clippy.toml` | 25 |
+| Function length | manual review (`too-many-lines-threshold` in `clippy.toml`) | 150 lines |
 | Clippy warnings | `-D warnings` on the command line | N/A |
+| Licenses / advisories | `cargo deny check` + `deny.toml` | policy |
 | Data flow / coupling | manual review | N/A |
 
 ## General rules

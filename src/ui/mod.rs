@@ -1,12 +1,15 @@
 pub mod aur_ssh;
 pub mod build;
 pub mod connection;
+pub mod folder_pick;
 pub mod home;
+pub mod input_escape;
 pub mod log_view;
 pub mod manage;
 pub mod onboarding;
 pub mod package_editor;
 pub mod pkgbuild_editor;
+pub mod pkgbuild_stale;
 pub mod publish;
 pub mod shell;
 pub mod ssh_setup;
