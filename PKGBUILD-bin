@@ -1,0 +1,143 @@
+# Maintainer: Firstpick firstpick1992@proton.me
+#
+# Binary AUR package for aur-pkgbuilder.
+#
+# Release workflow (automated by aur-pkgbuilder itself once bootstrapped):
+#   1. Bump `pkgver` below to the new git tag (without the leading `v`).
+#   2. Attach `aur-pkgbuilder-x86_64` and `aur-pkgbuilder-aarch64` binaries
+#      to the matching GitHub release at the URL under `source_x86_64=` /
+#      `source_aarch64=`.
+#   3. Run `updpkgsums` in this directory to refresh all three sha256 arrays.
+#   4. Run `makepkg --printsrcinfo > .SRCINFO`.
+#   5. Commit PKGBUILD + .SRCINFO to the AUR git repo and push.
+pkgname=aur-pkgbuilder-bin
+pkgver=0.1.0
+_tag="v$pkgver"
+pkgrel=1
+pkgdesc="GTK4/libadwaita GUI for building, validating, and publishing AUR packages (binary version)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Firstp1ck/aur-pkgbuilder"
+license=('MIT')
+options=('!strip')
+
+# Runtime dependencies. The app shells out to the tools below; missing
+# optional tools surface an install hint inside the app rather than failing.
+depends=(
+    'gtk4'
+    'libadwaita'
+    'glibc'
+    'gcc-libs'
+    'git'
+    'openssh'
+    'pacman-contrib'  # updpkgsums
+    'xdg-utils'       # xdg-open (working dir, AUR account page)
+)
+optdepends=(
+    'base-devel: makepkg + fakeroot for the Build and Extended Validation steps'
+    'namcap: PKGBUILD and built-package lint in the Validate step'
+    'shellcheck: bash lint in the Validate step'
+)
+
+provides=("aur-pkgbuilder=${pkgver}")
+conflicts=('aur-pkgbuilder' 'aur-pkgbuilder-git')
+
+# Tarball for LICENSE / README (architecture-independent).
+source=("aur-pkgbuilder-${_tag}.tar.gz::${url}/archive/refs/tags/${_tag}.tar.gz")
+
+# Architecture-specific prebuilt binaries attached to the GitHub release.
+source_x86_64=("aur-pkgbuilder-x86_64::${url}/releases/download/${_tag}/aur-pkgbuilder-x86_64")
+source_aarch64=("aur-pkgbuilder-aarch64::${url}/releases/download/${_tag}/aur-pkgbuilder-aarch64")
+
+# Replace every `SKIP` with the value `updpkgsums` produces after the first
+# tagged release exists. `SKIP` is only acceptable before that initial
+# release has been published.
+sha256sums=('SKIP')
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+# The per-arch files are raw ELF binaries — do not try to extract them.
+noextract=("aur-pkgbuilder-x86_64" "aur-pkgbuilder-aarch64")
+
+prepare() {
+    case "$CARCH" in
+        x86_64)  local binary_path="$srcdir/aur-pkgbuilder-x86_64" ;;
+        aarch64) local binary_path="$srcdir/aur-pkgbuilder-aarch64" ;;
+    esac
+
+    if [[ ! -f "$binary_path" ]]; then
+        error "aur-pkgbuilder binary not found in $srcdir"
+        ls -la "$srcdir/" || true
+        return 1
+    fi
+
+    chmod +x "$binary_path"
+
+    # Check ELF magic bytes directly (more reliable than `file`).
+    local magic_bytes
+    magic_bytes=$(head -c 4 "$binary_path" 2>/dev/null | od -A n -t x1 | tr -d ' \n' || echo "")
+    if [[ "$magic_bytes" != "7f454c46" ]]; then
+        # 7f 45 4c 46 = ELF magic: 0x7F 'E' 'L' 'F'
+        error "Downloaded aur-pkgbuilder binary does not have ELF magic bytes"
+        error "Expected: 7f454c46, Got: $magic_bytes"
+        error "Try cleaning your build cache and rebuilding"
+        return 1
+    fi
+
+    # ELF e_machine at offset 18–19 (little-endian). Avoids calling readelf.
+    # EM_X86_64=62, EM_AARCH64=183 (elf.h).
+    local em_lo em_hi emachine
+    em_lo=$(od -An -t u1 -j 18 -N 1 "$binary_path" | tr -d ' \n')
+    em_hi=$(od -An -t u1 -j 19 -N 1 "$binary_path" | tr -d ' \n')
+    if [[ -z "$em_lo" || -z "$em_hi" ]]; then
+        error "Could not read ELF e_machine from binary (file too short or unreadable?)"
+        return 1
+    fi
+    emachine=$((10#$em_lo + 10#$em_hi * 256))
+
+    case "$CARCH" in
+        x86_64)
+            if ((emachine != 62)); then
+                error "Expected x86_64 binary (e_machine=62), got e_machine=$emachine"
+                return 1
+            fi
+            ;;
+        aarch64)
+            if ((emachine != 183)); then
+                error "Expected AArch64 binary (e_machine=183), got e_machine=$emachine"
+                return 1
+            fi
+            ;;
+    esac
+
+    # Emit a .desktop entry so the app shows up in application menus. Upstream
+    # does not ship one yet; drop this block once `data/aur-pkgbuilder.desktop`
+    # lands in the release tarball.
+    cat > "$srcdir/aur-pkgbuilder.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AUR Builder
+GenericName=AUR Package Builder
+Comment=Build, validate, and publish packages to the Arch User Repository
+Exec=aur-pkgbuilder
+Icon=package-x-generic
+Terminal=false
+Categories=Development;PackageManager;GTK;
+Keywords=aur;pacman;makepkg;pkgbuild;arch;
+StartupNotify=true
+EOF
+}
+
+package() {
+    # Source tarball extracts to `aur-pkgbuilder-<version>` (no leading `v`).
+    local srcroot="$srcdir/aur-pkgbuilder-${pkgver}"
+
+    case "$CARCH" in
+        x86_64)  local binary_path="$srcdir/aur-pkgbuilder-x86_64" ;;
+        aarch64) local binary_path="$srcdir/aur-pkgbuilder-aarch64" ;;
+    esac
+
+    install -Dm755 "$binary_path"                                "$pkgdir/usr/bin/aur-pkgbuilder"
+    install -Dm644 "$srcroot/LICENSE"                            "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 "$srcroot/README.md"                          "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 "$srcdir/aur-pkgbuilder.desktop"              "$pkgdir/usr/share/applications/aur-pkgbuilder.desktop"
+}

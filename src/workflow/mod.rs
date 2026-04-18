@@ -1,0 +1,11 @@
+pub mod admin;
+pub mod aur_account;
+pub mod aur_git;
+pub mod aur_ssh;
+pub mod build;
+pub mod package;
+pub mod preflight;
+pub mod registry;
+pub mod ssh_setup;
+pub mod sync;
+pub mod validate;

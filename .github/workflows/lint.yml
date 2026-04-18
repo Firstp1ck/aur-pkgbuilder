@@ -1,0 +1,55 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Format check ──────────────────────────────────────────────────────
+  # Ensures no unformatted code slips through.
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # ── Clippy (matches local AGENTS.md / CLAUDE.md gate) ─────────────────
+  # `-D warnings` is the only lint gate we enforce today; see AGENTS.md
+  # for the aspirational complexity / docs rules.
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install GTK4 / libadwaita headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libgtk-4-dev \
+              libadwaita-1-dev \
+              pkg-config
+
+      - name: Cache cargo registry + build target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings

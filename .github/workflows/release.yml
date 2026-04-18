@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0); must be an existing tag or ref'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  get-version:
+    name: Get version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      release_notes: ${{ steps.version.outputs.release_notes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref }}
+
+      - name: Get version, prerelease flag, and release notes
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            IS_TAG_PUSH="false"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+            IS_TAG_PUSH="true"
+          fi
+          echo "Release version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          STRIP="${VERSION#v}"
+          MAJOR=$(echo "$STRIP" | cut -d. -f1)
+          if [ "$MAJOR" -lt 1 ] 2>/dev/null; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$IS_TAG_PUSH" = "true" ]; then
+            TAG_TYPE=$(git cat-file -t "$VERSION" 2>/dev/null || echo "")
+            if [ "$TAG_TYPE" = "tag" ]; then
+              TAG_NOTES=$(git show "$VERSION" --format='%B' --no-patch 2>/dev/null || echo "")
+              TAG_NOTES=$(echo "$TAG_NOTES" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              if [ -n "$TAG_NOTES" ]; then
+                DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
+                {
+                  echo "release_notes<<$DELIMITER"
+                  echo "$TAG_NOTES"
+                  echo "$DELIMITER"
+                } >> "$GITHUB_OUTPUT"
+              else
+                DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
+                {
+                  echo "release_notes<<$DELIMITER"
+                  echo "Release $VERSION"
+                  echo "$DELIMITER"
+                } >> "$GITHUB_OUTPUT"
+              fi
+            else
+              DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
+              {
+                echo "release_notes<<$DELIMITER"
+                echo "Release $VERSION"
+                echo "$DELIMITER"
+              } >> "$GITHUB_OUTPUT"
+            fi
+          else
+            DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
+            {
+              echo "release_notes<<$DELIMITER"
+              echo "Release $VERSION"
+              echo "$DELIMITER"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+  # Builds the per-arch binaries consumed by `PKGBUILD-bin`.
+  build-linux:
+    name: Build Linux (${{ matrix.asset }})
+    needs: get-version
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            asset: aur-pkgbuilder-x86_64
+          - runner: ubuntu-24.04-arm
+            asset: aur-pkgbuilder-aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.get-version.outputs.version }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install GTK4 / libadwaita headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libgtk-4-dev \
+              libadwaita-1-dev \
+              pkg-config
+
+      - name: Build Release
+        run: cargo build --release --locked
+
+      - name: Stage binary for upload
+        run: cp target/release/aur-pkgbuilder "${{ matrix.asset }}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish-release:
+    name: Publish release
+    needs: [get-version, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: asset-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        run: |
+          set -euo pipefail
+          cd release-files
+          test -f aur-pkgbuilder-x86_64
+          test -f aur-pkgbuilder-aarch64
+          sha256sum aur-pkgbuilder-x86_64 aur-pkgbuilder-aarch64 > SHA256SUMS
+          echo "SHA256SUMS:"
+          cat SHA256SUMS
+
+      - name: Create release body
+        id: release-body
+        env:
+          RELEASE_NOTES: ${{ needs.get-version.outputs.release_notes }}
+        run: |
+          printf '%s' "$RELEASE_NOTES" > /tmp/release_body.txt
+
+          DELIMITER="RELEASE_BODY_$(date +%s)_$$"
+          {
+            echo "body<<$DELIMITER"
+            cat /tmp/release_body.txt
+            echo ""
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.get-version.outputs.version }}
+          name: Release ${{ needs.get-version.outputs.version }}
+          body: ${{ steps.release-body.outputs.body }}
+          files: |
+            release-files/aur-pkgbuilder-x86_64
+            release-files/aur-pkgbuilder-aarch64
+            release-files/SHA256SUMS
+          draft: false
+          prerelease: ${{ needs.get-version.outputs.prerelease == 'true' }}
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
