@@ -9,7 +9,7 @@
 [![x86_64](https://img.shields.io/badge/CPU-x86__64-blue.svg)](.)
 [![aarch64](https://img.shields.io/badge/CPU-aarch64-blue.svg)](.)
 
-aur-pkgbuilder is a GTK4/libadwaita desktop application that walks a maintainer through building and publishing an Arch User Repository package end-to-end: sign in with your AUR username and pull the packages you maintain, set up SSH for git, sync a PKGBUILD from its upstream source, run the standard AUR checks, build with `makepkg`, then commit and push to the AUR git remote. Each package can keep its tree under the working directory (default folder matches the package id, or a custom relative path), or you can point it at any absolute folder on disk when you already maintain the PKGBUILD outside the work directory. Packages are data-driven through an editable registry, so new AUR packages can be added and administered entirely from the GUI.
+aur-pkgbuilder is a GTK4/libadwaita desktop application that walks a maintainer through building and publishing an Arch User Repository package end-to-end: sign in with your AUR username and pull the packages you maintain, set up SSH for git, sync a PKGBUILD from its upstream source, run the standard AUR checks, build with `makepkg`, then commit and push to the AUR git remote. **Register new AUR package** on Home covers the first-time `git push` that creates a new pkgbase on the AUR when you do not already have a repo there; **Publish** stays the path for existing packages. Each package can keep its tree under the working directory (default folder matches the package id, or a custom relative path), or you can point it at any absolute folder on disk when you already maintain the PKGBUILD outside the work directory. Packages are data-driven through an editable registry, so new AUR packages can be added and administered entirely from the GUI.
 
 ## Community
 
@@ -28,6 +28,7 @@ Idea or bug? Open an issue on the project tracker. Contributions are welcome —
 ## Table of Contents
 - [Quick start](#quick-start)
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
@@ -111,19 +112,19 @@ There are two distinct AUR identities this app cares about, and they show up in 
 2. Tick the packages you want to administer and press **Import & continue to SSH**. The app imports the picks into the registry and pushes you straight into the SSH setup step.
 3. On the SSH setup screen, press **Run setup** for the one-click flow (creates `~/.ssh/aur`, writes the `Host aur.archlinux.org` block, pins the server host keys), then **Finish onboarding** to return home.
 4. Run **Test SSH connection** on the AUR connection screen — this is the *verification* step that proves the username belongs to you. Until this probe passes in the current session, the Publish step blocks commit/push behind a banner.
-5. Walk through Sync → Version → Validate → Build → Publish.
+5. Walk through Sync → Version → Validate → Build → Publish (or use **Register new AUR package** on Home when the AUR Git repo does not exist yet — that wizard validates, prepares the tree, and runs the initial push once SSH is verified).
 
 **Skip setup** on the onboarding screen leaves the registry empty and SSH unconfigured — the app still opens cleanly, you can edit PKGBUILDs and run local builds, but the Publish step will keep its "SSH is not verified" banner until you set SSH up and run the probe.
 
 The onboarding is always reachable again from **Import from AUR account…** on the home page.
 
-An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is required for Publish. The AUR repository for each package must already exist — first-time registration is planned (see [Roadmap](#roadmap)).
+An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is required for **Publish** and for the Register wizard’s remote steps. For packages that already have an AUR repo, use Publish; for a brand-new pkgbase, use **Register new AUR package** on Home.
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| **Guided wizard** | libadwaita tabs plus `NavigationView` overlays take you through onboarding (username → SSH setup) → home → AUR connection → sync → version → validate → build → publish (and **Manage packages**). Each step has clear prerequisites and surfaces errors as toasts. |
+| **Guided wizard** | libadwaita tabs plus `NavigationView` overlays take you through onboarding (username → SSH setup) → home → AUR connection → sync → version → validate → build → publish (and **Manage packages**). **Register new AUR package** opens as an overlay from Home. Each step has clear prerequisites and surfaces errors as toasts. |
 | **AUR login (username)** | Enter your AUR username once; the app queries the public AUR RPC for every package you maintain or co-maintain and imports the ones you pick. No passwords — the RPC is read-only, and the username is just an identifier. |
 | **AUR verification (SSH)** | One-click SSH setup: creates (or reuses) `~/.ssh/aur`, writes the `Host aur.archlinux.org` block into `~/.ssh/config`, and pins the server's host key into `~/.ssh/known_hosts`. Each step is also available on its own. Existing files are never overwritten. |
 | **Editable package registry** | Packages live in `~/.config/aur-pkgbuilder/packages.jsonc` (JSONC — comments allowed). Add, edit, and remove entries from the GUI; nothing about a specific package is hardcoded in source. Optional `destination_dir` is an absolute path to that package’s PKGBUILD/build tree; otherwise optional `sync_subdir` picks a folder under the working directory (default: package id). |
@@ -136,9 +137,83 @@ An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is requ
 | **Root safety** | Refuses to build as root to match `makepkg`'s own policy. |
 | **AUR git publish** | Clones `ssh://aur@aur.archlinux.org/<pkg_id>.git` on demand, regenerates `.SRCINFO`, shows a `git diff` preview, then commits and pushes with an editable commit message. |
 | **Default commit message** | Set a reusable template (supports `{pkg}` as the package name) via **Save as default** on the publish screen. Every subsequent commit opens with that template pre-filled and rendered, so you see the default and can edit before pushing. **Reset to default** re-renders the saved template if you change your mind mid-edit. |
-| **Administration screen** | Dedicated **Manage packages** view with per-package actions (open build dir, check upstream, archive), global lifecycle operations (register new, import existing), and a curated **AUR SSH commands** picker. Lifecycle stubs are tagged `preview` and surface "coming soon" toasts until implemented. |
+| **Home package list** | Search, sort, and filter the registry list; favorites stay grouped at the top. After you save your AUR username on the Connection tab, **Remove mismatched…** drops packages that failed the last maintainer/co-maintainer RPC check (shown in red in the list). |
+| **Register on AUR** | From Home, **Register new AUR package** runs a wizard: define the pkgbase, create a starter `PKGBUILD` or edit an existing tree, validate, **Prepare**, then the initial **push** to create the AUR Git repository (with optional handling when the remote already has history). A remote `PKGBUILD` probe avoids overwriting an existing AUR tree by mistake. |
+| **Administration screen** | **Manage packages** lists every entry with per-row actions (including **Check upstream** — compares the on-disk `PKGBUILD` to the configured upstream URL with a diff when they differ). **Import from existing AUR repo** and bulk **check all** remain `preview` stubs; **AUR SSH commands** opens from here. |
 | **AUR SSH commands** | Dedicated page that exposes the commands `aur@aur.archlinux.org` accepts — `help`, `list-repos`, `vote`, `unvote`, `flag`, `unflag`, `notify`, `unnotify`, `adopt`, `disown`, `setup-repo`, `set-comaintainers`, `set-keywords`. Destructive commands are clearly tagged; output streams into a shared log. |
 | **Persistent settings** | Working directory and SSH key path are stored at `~/.config/aur-pkgbuilder/config.jsonc` (JSONC — comments allowed). |
+
+## Screenshots
+
+UI captures from **v0.1.0** — same broad flow as [Usage](#usage) below. Newer builds add **Register new AUR package** and the Home search / sort / filter bar ahead of these stills.
+
+### Onboarding — import from AUR account
+
+Pick your AUR username, select packages from the RPC list, then continue to SSH setup.
+
+![Onboarding: AUR username and package list](images/Register_AUR_part1_v0.1.0.png)
+
+![Onboarding: package selection and import](images/Register_AUR_part2_v0.1.0.png)
+
+![Onboarding: continue to SSH setup](images/Register_AUR_part3_v0.1.0.png)
+
+### Home
+
+Registered packages, **Add package…**, **Manage packages…**, and **Import from AUR account…**.
+
+![Home — package registry and primary actions](images/Home_v0.1.0.png)
+
+### AUR connection
+
+Preflight tools, working directory, SSH key, and **Test SSH connection**.
+
+![AUR connection — verify environment and SSH](images/Connection_v0.1.0.png)
+
+### Sync PKGBUILD
+
+Upstream URL, destination folder, and download into the resolved tree.
+
+![Sync PKGBUILD from upstream](images/Sync_v0.1.0.png)
+
+### Version and checksums
+
+PKGBUILD editor, quick fields, diff, and **Run updpkgsums**.
+
+![Version — editor and checksums (1)](images/Version_part1_v0.1.0.png)
+
+![Version — editor and checksums (2)](images/Version_part2_v0.1.0.png)
+
+### Validate
+
+Required checks, optional lints, extended fakeroot build, and shared log.
+
+![Validate — PKGBUILD checks and log](images/Validate_v0.1.0.png)
+
+### Build
+
+`makepkg` with toggles and streaming output.
+
+![Build — makepkg and build log](images/Build_v0.1.0.png)
+
+### Publish
+
+`.SRCINFO`, diff preview, commit message, and **Commit and push**.
+
+![Publish — git diff and push to AUR](images/Publish_v0.1.0.png)
+
+### Manage packages
+
+Administration surface: lifecycle actions, per-package menu, and entry to **AUR SSH commands**.
+
+![Manage packages — administration view](images/Manage_v0.1.0.png)
+
+### AUR SSH commands
+
+Curated `aur@aur.archlinux.org` command groups with per-row **Run** and shared log.
+
+![AUR SSH commands — account and voting groups](images/AUR_SSH_Commands_part1_v0.1.0.png)
+
+![AUR SSH commands — maintenance and metadata](images/AUR_SSH_Commands_part2_v0.1.0.png)
 
 ## Usage
 
@@ -146,11 +221,13 @@ Each screen of the wizard is self-contained and documents what it will run.
 
 **0. Onboarding — sign in + set up SSH** (first launch / **Import from AUR account…**) — Your username is the *login*; the AUR RPC uses it to list packages where you're maintainer or co-maintainer. Tick the ones you want to administer and press **Import & continue to SSH**. Imported packages land in the registry with a PKGBUILD URL pointing at the AUR's cgit plain view, and the app immediately pushes you to the SSH setup step — **Run setup** there is a single button that creates `~/.ssh/aur`, writes the SSH config entry, and populates `known_hosts`. **Finish onboarding** returns to the home screen. **Skip setup** at any point is allowed; Publish will stay gated until you come back and finish SSH.
 
-**1. Home** — Registered packages appear as rows with edit (pencil) and remove (trash) buttons. Three action buttons sit under the list:
+**1. Home** — Above the list: **Search**, **Sort**, and **Filter** (including whether to hide rows that failed the last AUR-account RPC check). Registered packages appear as rows with edit (pencil) and remove (trash); favorites are grouped first. Action row:
 
 - **Add package…** — register a package by hand (AUR pkgname, raw PKGBUILD URL, kind).
-- **Manage packages…** — open the administration view.
+- **Register new AUR package** — wizard for a new pkgbase: starter or custom `PKGBUILD`, validate, prepare clone, initial push (needs verified SSH).
+- **Manage packages…** — administration view (upstream checks, SSH commands; some lifecycle buttons still `preview`).
 - **Import from AUR account…** — re-enter the onboarding to add more packages from your AUR profile.
+- **Remove mismatched…** — bulk-remove packages not listed for your saved AUR username as maintainer or co-maintainer after the last Connection-tab check (destructive; confirms first).
 
 **2. AUR connection — verify with SSH** — Lists required tools with install hints, lets you set the working directory (type a path or use **Browse…**), pick an SSH key, and runs the SSH probe. Toasts confirm saves and other async results on this screen. This is the step that *verifies* the username you entered on onboarding actually belongs to you. **Continue is always available** — sync / build / validate don't need SSH, only Publish does; a failed probe doesn't block the rest of the wizard. The **Set up SSH…** sub-page runs the concrete setup:
 
@@ -177,12 +254,11 @@ This step needs a verified SSH connection. If you haven't run **Test SSH connect
 
 The commit-message field is pre-filled from your saved default template (fallback: `{pkg}: update`). The "Default template" row below the field shows the current default. **Save as default** stores whatever's in the field as the new template — if you typed the current package name literally, it's de-substituted back to `{pkg}` so the template keeps working across packages. **Reset to default** reloads the template and re-renders it for the current package.
 
-**Manage packages** (from the home page) — Lifecycle and per-package operations:
-- `Register new AUR package` *(preview)* — initial `git push` creating a brand-new AUR repo.
+**Manage packages** (from the home page) — **Register new AUR package** lives on **Home**, not here. This screen groups lifecycle and SSH shortcuts in collapsible sections, then the full package list:
 - `Import from existing AUR repo` *(preview)* — clone by AUR pkgname and pre-fill a registry entry.
-- `Check all packages for upstream updates` *(preview)* — compare each local `pkgver` against upstream.
+- `Check all packages for upstream updates` *(preview)* — run upstream comparison for every package in one go.
 - **AUR SSH commands** — opens the curated command picker (see below).
-- Per-row menu: open build wizard, open working directory (functional, via `xdg-open`), check upstream *(preview)*, archive / disown *(preview)*.
+- Per-row menu: open build wizard, open working directory (functional, via `xdg-open`), **Check upstream** (live — fetches the configured PKGBUILD URL and compares to disk), archive / disown *(preview)*.
 
 **AUR SSH commands** (from **Manage packages → Open**) — Curated picker for the subset of commands `aur@aur.archlinux.org` accepts. The page shares one package-name and one extra-args field across four groups:
 
@@ -234,11 +310,10 @@ Both files are safe to hand-edit — comments outside the JSON object block pers
 
 ## Roadmap
 
-The core wizard is feature-complete for day-to-day releases. The administration surface is scaffolded with `preview` stubs so the UI already has stable call sites; the underlying logic will land incrementally.
+The core wizard is feature-complete for day-to-day releases, including **Register new AUR package** from Home. Some administration actions are still `preview` stubs; they surface "coming soon" toasts until implemented.
 
 ### Tracked (preview)
 
-- **Register a new AUR package** — initial `git init` + push that creates the repository on aur.archlinux.org.
 - **Import from an existing AUR repo** — clone by pkgname and parse the PKGBUILD to pre-fill a registry entry.
 - **Check upstream for updates** — compare local vs upstream `pkgver` per package, with a bulk "check all" action.
 - **Archive / disown** — automate the AUR web RPC for `/packages/<id>/disown/`.
@@ -265,4 +340,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Contributing
 
-Contributions are welcome. Fork the repo, open a pull request, and keep the MVP scope in mind — administration stubs should be filled in one at a time with matching UX updates. From the repository root, `make help` lists `fmt`, `clippy`, `test`, and other shortcuts that mirror local checks.
+Contributions are welcome. Fork the repo, open a pull request, and keep the MVP scope in mind — remaining `preview` administration actions should land one at a time with matching UX updates. From the repository root, `make help` lists `fmt`, `clippy`, `test`, and other shortcuts that mirror local checks.

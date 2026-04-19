@@ -86,6 +86,7 @@ struct EditorState {
     license: EntryRow,
     depends: EntryRow,
     makedepends: EntryRow,
+    optdepends: EntryRow,
     conflicts: EntryRow,
     provides: EntryRow,
     source: EntryRow,
@@ -110,6 +111,9 @@ impl EditorState {
             license: entry("license — space-separated → array"),
             depends: entry("depends — space-separated package names"),
             makedepends: entry("makedepends — build deps, space-separated"),
+            optdepends: entry(
+                "optdepends — optional deps, space-separated (use text view for multi-word reasons)",
+            ),
             conflicts: entry("conflicts — space-separated"),
             provides: entry("provides — space-separated"),
             source: entry("source — single-line tokens; use text view for long URLs"),
@@ -147,6 +151,9 @@ impl EditorState {
         if let Some(v) = &fields.makedepends_tokens {
             self.makedepends.set_text(v);
         }
+        if let Some(v) = &fields.optdepends_tokens {
+            self.optdepends.set_text(v);
+        }
         if let Some(v) = &fields.conflicts_tokens {
             self.conflicts.set_text(v);
         }
@@ -179,6 +186,7 @@ impl EditorState {
             license_tokens: t(&self.license),
             depends_tokens: t(&self.depends),
             makedepends_tokens: t(&self.makedepends),
+            optdepends_tokens: t(&self.optdepends),
             conflicts_tokens: t(&self.conflicts),
             provides_tokens: t(&self.provides),
             source_tokens: t(&self.source),
@@ -326,6 +334,7 @@ fn entry(title: &str) -> EntryRow {
 /// Details:
 /// - Uses the expander’s vertical natural size before/after each toggle and applies the delta to the
 ///   window height (idle callback so layout has settled). The first notification only records a baseline.
+/// - Does not set a minimum window height — the user can shrink the dialog freely after nudges.
 /// - Intended for the Register wizard modal; embedded editors pass `None` for [`build_section`]'s window.
 fn connect_quick_metadata_window_height_sync(win: &Window, expander: &ExpanderRow) {
     let win = win.clone();
@@ -344,9 +353,8 @@ fn connect_quick_metadata_window_height_sync(win: &Window, expander: &ExpanderRo
                 }
                 Some(prev_nat) => {
                     let dh = exp_nat - prev_nat;
-                    let new_h = (win.height() + dh).clamp(360, 2400);
+                    let new_h = (win.height() + dh).clamp(1, 2400);
                     win.set_default_size(width, new_h);
-                    win.set_size_request(-1, new_h);
                     last_nat.set(Some(exp_nat));
                 }
             }
@@ -366,6 +374,7 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
     exp.add_row(&st.license);
     exp.add_row(&st.depends);
     exp.add_row(&st.makedepends);
+    exp.add_row(&st.optdepends);
     exp.add_row(&st.conflicts);
     exp.add_row(&st.provides);
     exp.add_row(&st.source);
@@ -377,7 +386,9 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
 /// - `pkg_source`: which [`PackageDef`] supplies paths and reload/save targets.
 /// - `toasts`: success / failure feedback.
 /// - `resize_height_toplevel`: when set (Register modal), **Quick metadata** expand/collapse nudges the
-///   window height by the measured row delta.
+///   window height by the measured row delta (no minimum height is imposed on the window).
+/// - Register with `expand_quick_metadata: true` (after **Create starter PKGBUILD**) uses a shorter
+///   minimum height for the full-text scroll than the Version tab editor.
 ///
 /// Output:
 /// - A boxed [`ListBox`] whose expander wraps the editor block for the Version page.
@@ -516,6 +527,20 @@ pub fn build_section(
         connect_quick_metadata_window_height_sync(win, &expander);
     }
 
+    // Shorter full-text area after Create starter PKGBUILD (quick metadata starts expanded);
+    // Version tab keeps a taller minimum for day-to-day editing.
+    let full_pkgbuild_min_h = if matches!(
+        pkg_source,
+        PkgbuildEditorPkgSource::RegisterWizard {
+            expand_quick_metadata: true,
+            ..
+        }
+    ) {
+        280
+    } else {
+        520
+    };
+
     let full_label = Label::builder()
         .label("Full PKGBUILD (prepare, build, check, package, …)")
         .halign(Align::Start)
@@ -536,8 +561,8 @@ pub fn build_section(
         .child(&view)
         .vexpand(true)
         .hexpand(true)
-        // Taller default so the full PKGBUILD is usable without constant scrolling.
-        .min_content_height(520)
+        // Taller default on Version; shorter in Register right after starter create (quick metadata open).
+        .min_content_height(full_pkgbuild_min_h)
         .build();
     scroll.set_policy(PolicyType::Automatic, PolicyType::Automatic);
 

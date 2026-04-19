@@ -1,8 +1,9 @@
 //! Read/write and light-touch field merging for `PKGBUILD` files.
 //!
-//! What: Safe load/save plus **single-line** assignment replacement for common
-//! keys, plus `# Maintainer:` line handling. Multiline `source=(` blobs are not
-//! auto-rewritten — use the full editor for those.
+//! What: Safe load/save plus assignment replacement for common keys, plus
+//! `# Maintainer:` line handling. Quick metadata reads multiline bash arrays
+//! (`depends=(` … `)`, etc.); saving those fields collapses them to one line.
+//! Very large arrays are still easier to edit in the full text view.
 //!
 //! Details:
 //! - Writes via a temp file in the same directory then `rename` for atomicity.
@@ -24,7 +25,7 @@ pub enum PkgbuildEditError {
     Msg(String),
 }
 
-/// Scalar / array fields the quick editor can round-trip on **single-line** `key=…` forms.
+/// Scalar / array fields the quick editor can round-trip on `key=…` forms (arrays may span lines).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PkgbuildQuickFields {
     pub maintainer_comment: Option<String>,
@@ -37,6 +38,7 @@ pub struct PkgbuildQuickFields {
     pub license_tokens: Option<String>,
     pub depends_tokens: Option<String>,
     pub makedepends_tokens: Option<String>,
+    pub optdepends_tokens: Option<String>,
     pub conflicts_tokens: Option<String>,
     pub provides_tokens: Option<String>,
     pub source_tokens: Option<String>,
@@ -126,34 +128,122 @@ pub async fn write_pkgbuild(package_dir: &Path, content: &str) -> Result<(), Pkg
 
 /// Parse quick fields from PKGBUILD text (best-effort).
 pub fn parse_quick_fields(text: &str) -> PkgbuildQuickFields {
+    let lines: Vec<&str> = text.lines().collect();
     let mut out = PkgbuildQuickFields::default();
-    for line in text.lines() {
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
         let t = line.trim_start();
         if let Some(rest) = t.strip_prefix("# Maintainer:") {
             out.maintainer_comment = Some(rest.trim().to_string());
+            i += 1;
             continue;
         }
         let Some((key, val)) = parse_simple_assignment(t) else {
+            i += 1;
             continue;
         };
-        let inner = strip_outer_quotes(val.trim());
-        match key {
-            "pkgname" => out.pkgname = Some(inner.to_string()),
-            "pkgver" => out.pkgver = Some(inner.to_string()),
-            "pkgrel" => out.pkgrel = Some(inner.to_string()),
-            "pkgdesc" => out.pkgdesc = Some(inner.to_string()),
-            "arch" => out.arch_tokens = Some(array_inner_tokens(inner)),
-            "url" => out.url = Some(inner.to_string()),
-            "license" => out.license_tokens = Some(array_inner_tokens(inner)),
-            "depends" => out.depends_tokens = Some(array_inner_tokens(inner)),
-            "makedepends" => out.makedepends_tokens = Some(array_inner_tokens(inner)),
-            "conflicts" => out.conflicts_tokens = Some(array_inner_tokens(inner)),
-            "provides" => out.provides_tokens = Some(array_inner_tokens(inner)),
-            "source" => out.source_tokens = Some(array_inner_tokens(inner)),
-            _ => {}
-        }
+        let full_rhs = if is_quick_array_key(key) && val.trim_start().starts_with('(') {
+            let (combined, next_i) = collect_multiline_array_rhs(&lines, i, val);
+            i = next_i;
+            combined
+        } else {
+            i += 1;
+            val.to_string()
+        };
+        apply_parsed_assignment(&mut out, key, &full_rhs);
     }
     out
+}
+
+/// Keys whose RHS is a bash array and may span multiple lines (`key=(` … `)`).
+fn is_quick_array_key(key: &str) -> bool {
+    matches!(
+        key,
+        "arch"
+            | "license"
+            | "depends"
+            | "makedepends"
+            | "optdepends"
+            | "conflicts"
+            | "provides"
+            | "source"
+    )
+}
+
+/// Net `(` minus `)` count outside single- / double-quoted regions (good enough for PKGBUILD arrays).
+fn net_unquoted_paren_delta(s: &str) -> i32 {
+    #[derive(Clone, Copy)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+    let mut depth = 0i32;
+    let mut q = Quote::None;
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        match q {
+            Quote::Single => {
+                if c == '\'' {
+                    q = Quote::None;
+                }
+            }
+            Quote::Double => {
+                if c == '\\' {
+                    let _ = it.next();
+                } else if c == '"' {
+                    q = Quote::None;
+                }
+            }
+            Quote::None => match c {
+                '\'' => q = Quote::Single,
+                '"' => q = Quote::Double,
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            },
+        }
+    }
+    depth
+}
+
+/// Concatenate `first_rhs` (text after `=` on `lines[line_idx]`) with following lines until parens balance.
+fn collect_multiline_array_rhs(
+    lines: &[&str],
+    line_idx: usize,
+    first_rhs: &str,
+) -> (String, usize) {
+    let mut acc = first_rhs.to_string();
+    let mut depth = net_unquoted_paren_delta(first_rhs);
+    let mut j = line_idx + 1;
+    while depth > 0 && j < lines.len() {
+        acc.push('\n');
+        acc.push_str(lines[j]);
+        depth += net_unquoted_paren_delta(lines[j]);
+        j += 1;
+    }
+    (acc, j)
+}
+
+fn apply_parsed_assignment(out: &mut PkgbuildQuickFields, key: &str, full_rhs: &str) {
+    let inner = strip_outer_quotes(full_rhs.trim());
+    match key {
+        "pkgname" => out.pkgname = Some(inner.to_string()),
+        "pkgver" => out.pkgver = Some(inner.to_string()),
+        "pkgrel" => out.pkgrel = Some(inner.to_string()),
+        "pkgdesc" => out.pkgdesc = Some(inner.to_string()),
+        "arch" => out.arch_tokens = Some(array_inner_tokens(inner)),
+        "url" => out.url = Some(inner.to_string()),
+        "license" => out.license_tokens = Some(array_inner_tokens(inner)),
+        "depends" => out.depends_tokens = Some(array_inner_tokens(inner)),
+        "makedepends" => out.makedepends_tokens = Some(array_inner_tokens(inner)),
+        "optdepends" => out.optdepends_tokens = Some(array_inner_tokens(inner)),
+        "conflicts" => out.conflicts_tokens = Some(array_inner_tokens(inner)),
+        "provides" => out.provides_tokens = Some(array_inner_tokens(inner)),
+        "source" => out.source_tokens = Some(array_inner_tokens(inner)),
+        _ => {}
+    }
 }
 
 /// Apply [`PkgbuildQuickFields`] onto `text`. Empty / `None` fields are skipped.
@@ -188,6 +278,9 @@ pub fn merge_quick_fields(text: &str, fields: &PkgbuildQuickFields) -> String {
     }
     if let Some(v) = &fields.makedepends_tokens {
         cur = merge_assignment_line(&cur, "makedepends", &bash_array_from_tokens(v));
+    }
+    if let Some(v) = &fields.optdepends_tokens {
+        cur = merge_assignment_line(&cur, "optdepends", &bash_array_from_tokens(v));
     }
     if let Some(v) = &fields.conflicts_tokens {
         cur = merge_assignment_line(&cur, "conflicts", &bash_array_from_tokens(v));
@@ -225,12 +318,64 @@ fn strip_outer_quotes(s: &str) -> &str {
     }
 }
 
-/// Turns `foo bar` from UI into tokens for `('foo' 'bar')`.
+/// Split a bash array “body” (inside parentheses) on whitespace outside `'…'` / `"…"`.
+///
+/// Details: PKGBUILD entries like `'paru: AUR helper'` must stay one token; naive
+/// `split_whitespace` breaks on the spaces inside the quotes.
+fn tokenize_bash_array_body(body: &str) -> Vec<&str> {
+    let bytes = body.as_bytes();
+    let mut elems = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let start = i;
+        match bytes[i] {
+            b'\'' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'\'' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1;
+                }
+                elems.push(&body[start..i]);
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'\\' => i = (i + 2).min(bytes.len()),
+                        b'"' => {
+                            i += 1;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+                elems.push(&body[start..i]);
+            }
+            _ => {
+                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                elems.push(&body[start..i]);
+            }
+        }
+    }
+    elems
+}
+
+/// Turns `foo bar` from UI into tokens for `('foo' 'bar')`; respects quotes in PKGBUILD arrays.
 fn array_inner_tokens(inner: &str) -> String {
-    inner
-        .trim_matches(|c| c == '(' || c == ')')
-        .split_whitespace()
-        .map(|t| strip_outer_quotes(t).to_string())
+    let body = inner.trim_matches(|c| c == '(' || c == ')');
+    tokenize_bash_array_body(body)
+        .into_iter()
+        .map(|t| strip_outer_quotes(t.trim()).to_string())
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
@@ -336,22 +481,43 @@ fn preserve_indent(original_line: &str, new_body: &str) -> String {
 
 fn merge_assignment_line(content: &str, key: &str, rhs: &str) -> String {
     let new_line_body = format!("{key}={rhs}");
+    let lines: Vec<&str> = content.lines().collect();
     let mut replaced = false;
     let mut out = String::new();
-    for line in content.lines() {
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
         let t = line.trim_start();
-        if let Some((k, _)) = parse_simple_assignment(t)
+        if let Some((k, val)) = parse_simple_assignment(t)
             && k == key
         {
             if !replaced {
                 out.push_str(&preserve_indent(line, &new_line_body));
                 out.push('\n');
                 replaced = true;
+                i += 1;
+                if is_quick_array_key(key) && val.trim_start().starts_with('(') {
+                    let mut depth = net_unquoted_paren_delta(val);
+                    while depth > 0 && i < lines.len() {
+                        depth += net_unquoted_paren_delta(lines[i]);
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            i += 1;
+            if is_quick_array_key(key) && val.trim_start().starts_with('(') {
+                let mut depth = net_unquoted_paren_delta(val);
+                while depth > 0 && i < lines.len() {
+                    depth += net_unquoted_paren_delta(lines[i]);
+                    i += 1;
+                }
             }
             continue;
         }
         out.push_str(line);
         out.push('\n');
+        i += 1;
     }
     if !replaced {
         insert_before_first_function(content, &format!("{new_line_body}\n"))
@@ -414,6 +580,47 @@ mod tests {
         let src = "depends=('glibc' 'shadow')\n";
         let p = parse_quick_fields(src);
         assert_eq!(p.depends_tokens.as_deref(), Some("glibc shadow"));
+    }
+
+    #[test]
+    fn parse_depends_keeps_spaces_inside_quotes() {
+        let src = "depends=('foo bar' 'baz')\n";
+        let p = parse_quick_fields(src);
+        assert_eq!(p.depends_tokens.as_deref(), Some("foo bar baz"));
+    }
+
+    #[test]
+    fn parse_optdepends_array() {
+        // Quick-field tokenization is whitespace-based; colons without spaces are fine.
+        let src = "optdepends=('vim:for_editing' 'python-docutils')\n";
+        let p = parse_quick_fields(src);
+        assert_eq!(
+            p.optdepends_tokens.as_deref(),
+            Some("vim:for_editing python-docutils")
+        );
+    }
+
+    #[test]
+    fn parse_multiline_optdepends() {
+        let src = "optdepends=(\n    'paru: AUR helper'\n    'yay: other'\n)\n";
+        let p = parse_quick_fields(src);
+        assert_eq!(
+            p.optdepends_tokens.as_deref(),
+            Some("paru: AUR helper yay: other")
+        );
+    }
+
+    #[test]
+    fn merge_multiline_optdepends_replaces_full_block() {
+        let src = "pkgname=x\noptdepends=(\n  'vim: editing'\n)\npkgrel=1\n";
+        let f = PkgbuildQuickFields {
+            optdepends_tokens: Some("nano:editing".into()),
+            ..Default::default()
+        };
+        let got = merge_quick_fields(src, &f);
+        assert!(got.contains("optdepends=('nano:editing')"));
+        assert!(!got.contains("'vim: editing'"));
+        assert!(got.contains("pkgrel=1"));
     }
 
     #[test]
