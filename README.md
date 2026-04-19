@@ -73,7 +73,7 @@ rustup default stable
 
 `gtk4` and `libadwaita` from the runtime list double as build-time headers via `pkg-config`, so no separate `-devel` package is needed.
 
-### Install via an AUR helper
+### Install via an AUR helper (NOT YET RELEASED)
 
 ```bash
 paru -S aur-pkgbuilder-bin       # or: yay -S aur-pkgbuilder-bin
