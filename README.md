@@ -17,13 +17,13 @@ Idea or bug? Open an issue on the project tracker. Contributions are welcome —
 
 ## Supported Platforms
 
-| Supported Distributions | Supported Desktops |
-|:---|:---|
-| [![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?logo=arch-linux&logoColor=white)](https://archlinux.org/) | [![GNOME](https://img.shields.io/badge/GNOME-4A86CF?logo=gnome&logoColor=white)](https://www.gnome.org/) |
-| [![EndeavourOS](https://img.shields.io/badge/EndeavourOS-1793D1?logo=endeavouros&logoColor=white)](https://endeavouros.com/) | [![KDE Plasma](https://img.shields.io/badge/KDE%20Plasma-1D99F3?logo=kde&logoColor=white)](https://kde.org/) |
-| [![CachyOS](https://img.shields.io/badge/CachyOS-1793D1?logo=arch-linux&logoColor=white)](https://cachyos.org/) | [![Wayland](https://img.shields.io/badge/Wayland-FFB300)](https://wayland.freedesktop.org/) |
-| [![Manjaro](https://img.shields.io/badge/Manjaro-35BF5C?logo=manjaro&logoColor=white)](https://manjaro.org/) | [![X11](https://img.shields.io/badge/X11-F28834)](https://www.x.org/) |
-| [![Artix](https://img.shields.io/badge/Artix-1793D1?logo=arch-linux&logoColor=white)](https://artixlinux.org/) | |
+| Supported Distributions | Supported Desktops | Supported Languages |
+|:---|:---|:---|
+| [![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?logo=arch-linux&logoColor=white)](https://archlinux.org/) | [![GNOME](https://img.shields.io/badge/GNOME-4A86CF?logo=gnome&logoColor=white)](https://www.gnome.org/) | [![English](https://img.shields.io/badge/English-1793D1)](https://github.com/Firstp1ck/aur-pkgbuilder) |
+| [![EndeavourOS](https://img.shields.io/badge/EndeavourOS-1793D1?logo=endeavouros&logoColor=white)](https://endeavouros.com/) | [![KDE Plasma](https://img.shields.io/badge/KDE%20Plasma-1D99F3?logo=kde&logoColor=white)](https://kde.org/) | [![German](https://img.shields.io/badge/German-1793D1)](https://github.com/Firstp1ck/aur-pkgbuilder) |
+| [![CachyOS](https://img.shields.io/badge/CachyOS-1793D1?logo=arch-linux&logoColor=white)](https://cachyos.org/) | [![Wayland](https://img.shields.io/badge/Wayland-FFB300)](https://wayland.freedesktop.org/) | |
+| [![Manjaro](https://img.shields.io/badge/Manjaro-35BF5C?logo=manjaro&logoColor=white)](https://manjaro.org/) | [![X11](https://img.shields.io/badge/X11-F28834)](https://www.x.org/) | |
+| [![Artix](https://img.shields.io/badge/Artix-1793D1?logo=arch-linux&logoColor=white)](https://artixlinux.org/) | | |
 
 ## Table of Contents
 - [Quick start](#quick-start)
