@@ -1,0 +1,343 @@
+aur-pkgbuilder release log started: 2026-04-20T00:25:26+02:00
+Report file: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-pending-20260420-002526.txt
+
+
+[1;36m╔════════════════════════════════════════════════════════════════════════╗[0m
+[1;36m║                 AUR-PKGBUILDER RELEASE AUTOMATION                       ║[0m
+[1;36m╚════════════════════════════════════════════════════════════════════════╝[0m
+
+[0;34m[INFO] [0mChecking prerequisites...
+[0;32m[SUCCESS] [0mAll prerequisites met
+[0;34m[INFO] [0mChecking release layout directories (AUR clones, optional wiki)...
+[1;33m[WARN] [0maur-pkgbuilder-bin path invalid or missing PKGBUILD: /home/firstpick/aur-packages/aur-pkgbuilder-bin
+[0;36mEnter path to aur-pkgbuilder-bin clone ([1ms[0m to skip, [1mq[0m to abort): [0m[1;33m[WARN] [0maur-pkgbuilder-bin process will be skipped for this run.
+[0;34m[INFO] [0mSkipping aur-pkgbuilder-git layout check (SKIP_AUR_GIT_PROCESS=true).
+[1;33m[WARN] [0mWiki path not found: 
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;32m[SUCCESS] [0mWiki directory: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder.wiki
+[0;34m[INFO] [0mRunning pre-flight checks...
+[0;32m[SUCCESS] [0mOn main branch
+[0;31m[ERROR] [0mWorking directory is not clean
+[0;34m[INFO] [0mUncommitted changes:
+ M dev/RELEASE/release-report-0.1.0-20260420-001906.txt
+?? dev/RELEASE/release-report-pending-20260420-002526.txt
+
+[0;36mContinue with uncommitted changes? [Y/n]: [0m[0;34m[INFO] [0mUpdated report filename with version: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-0.1.0-20260420-002526.txt
+
+[0;36mAUR PKGBUILD: how should pkgrel change after pkgver is set?[0m
+  1) reset — pkgrel=1 (new version release)
+  2) keep  — leave pkgrel as-is
+  3) bump  — pkgrel +1 (same pkgver, packaging-only change)
+[0;36mChoose [1-3] (default 1): [0m
+[0;34m[INFO] [0mRelease version: [1m0.1.0[0m
+[0;34m[INFO] [0mCurrent version: [1m0.1.0[0m
+[0;34m[INFO] [0mAUR pkgrel mode: [1mreset[0m
+
+[0;36mStart release process? [Y/n]: [0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;32m  PHASE: 1. Version Update[0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[0;34m[INFO] [0mCurrent version: [1m0.1.0[0m
+[0;34m[INFO] [0mNew version: [1m0.1.0[0m
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Updating Cargo.toml[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;32m[SUCCESS] [0mUpdated Cargo.toml
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Updating Cargo.lock[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+[0;32m[SUCCESS] [0mCargo.lock updated
+
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;32m  PHASE: 2. Documentation[0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Generate Release Notes[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mFollow [1m.cursor/commands/release-new.md[0m (version 0.1.0) with your AI/IDE tooling.
+[0;36mAfter completing the release-new workflow, press Enter...[0m[0;32m[SUCCESS] [0mRelease file created: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Updating CHANGELOG.md[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mVersion 0.1.0 already exists, replacing in place...
+[0;32m[SUCCESS] [0mCHANGELOG.md updated
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Auto-generate Announcement[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mExtracting full ## What's New section from release file...
+[0;32m[SUCCESS] [0mGenerated announcement (1251 bytes) at: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/ANNOUNCEMENTS/version_announcement_content.md
+
+[0;36m--- Announcement Preview ---[0m
+## What's New
+
+- **End-to-end workflow** — Home, connection checks, package sync, version step, validation, `makepkg` build, and AUR Git publish, with streaming logs in the app.
+- **PKGBUILD editing** — In-app editor with quick fields, diff-friendly updates, and safer `updpkgsums` handling when checksums already match sources.
+- **SSH and AUR** — Guided AUR SSH key setup, `known_hosts` fingerprint surfacing, preflight probes, and publish gating when SSH is not verified. Saving your AUR username runs an RPC check; Home flags registry packages not under that account for bulk cleanup.
+- **Bootstrap checks** — New packages validate **pkgbase** naming, explain pkgbase vs split `pkgname`, and probe the AUR plus official repos to avoid colliding names.
+- **Connection and environment** — Required-tool detection, richer **Recommended environment** hints (`base-devel`, devtools), and shortcuts to open common packaging config paths.
+- **Packages and paths** — JSONC config and registry, optional per-package destinations, validated paths, and folder pickers rooted on the window.
+- **Shell and UX** — Tabbed main shell with workflow navigation, connection/validation indicators, and packaged integration (icon and `.desktop` entry).
+
+[0;36m--- End Preview ---[0m
+
+[0;36mAccept this announcement? [Y/n]: [0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Update Version Announcement in Code[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m[WARN] [0mdev/scripts/update_version_announcement.py not found — skipping in-repo announcement wiring
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Update README[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mFollow [1m.cursor/commands/readme-update.md[0m with your AI/IDE tooling.
+[0;36mAfter completing the readme-update workflow, press Enter...[0m[0;32m[SUCCESS] [0mREADME update complete
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Update Wiki[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mFollow [1m.cursor/commands/wiki-update.md[0m with your AI/IDE tooling.
+[0;36mAfter completing the wiki-update workflow, press Enter...[0m[0;32m[SUCCESS] [0mWiki update complete
+[0;34m[INFO] [0mSkipping SECURITY.md update (patch release only)
+
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;32m  PHASE: 3. PKGBUILD Updates[0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;33m[WARN] [0mSkipping PKGBUILD updates (both AUR processes skipped).
+
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;32m  PHASE: 4. Build and Release[0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Running quality and security checks[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+    Checking aur-pkgbuilder v0.1.0 (/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.35s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/main.rs (target/debug/deps/aur_pkgbuilder-eabbfda4ff24261f)
+
+running 100 tests
+test i18n::tests::german_falls_back_to_english_when_key_missing ... ok
+test i18n::tests::tf_replaces_named_placeholders ... ok
+test i18n::tests::parse_locale_string_de ... ok
+test i18n::tests::crate_name_detects_aur_pkgbuilder_manifest ... ok
+test ui::home::tests::apply_view_filter_flagged_only ... ok
+test ui::home::tests::apply_view_sort_name_ascending ... ok
+test ui::home::tests::apply_view_search_matches_id_or_title ... ok
+test i18n::tests::walk_fallback_chain_resolves_de_ch ... ok
+test ui::home::tests::apply_view_sort_refresh_oldest ... ok
+test ui::home::tests::apply_view_sort_refresh_oldest_missing_last ... ok
+test ui::ssh_setup::ssh_agent_stamp_tests::summarize_agent_counts_nonempty_lines ... ok
+test ui::ssh_setup::ssh_agent_stamp_tests::summarize_agent_empty_agent_message ... ok
+test ui::ssh_setup::ssh_agent_stamp_tests::summarize_ssh_add_single_line_no_tooltip ... ok
+test workflow::admin::upstream_classify_tests::missing_pkgbuild_upstream_error_round_trip ... ok
+test workflow::aur_account::tests::effective_pkgbase_prefers_rpc_package_base_field ... ok
+test workflow::admin::upstream_classify_tests::pkgver_bump_is_outdated_with_diff ... ok
+test ui::ssh_setup::ssh_agent_stamp_tests::summarize_ssh_add_truncates_long_first_line ... ok
+test workflow::aur_account::tests::effective_pkgbase_falls_back_to_name ... ok
+test workflow::aur_account::tests::package_ids_not_under_account_empty_registry ... ok
+test workflow::admin::upstream_classify_tests::identical_after_crlf_normalization_is_up_to_date ... ok
+test workflow::aur_account::tests::package_ids_not_under_account_lists_only_missing ... ok
+test workflow::aur_git::tests::ensure_default_aur_gitignore_skips_existing ... ok
+test workflow::aur_git::tests::ensure_default_aur_gitignore_creates_expected_file ... ok
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_integrate_ff_behind/remote.git/ initialisiert
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_integrate_ff_behind/wc_a'...
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_ls_populated/remote.git/ initialisiert
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_no_file/remote.git/ initialisiert
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_branch_m/remote.git/ initialisiert
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_empty/remote.git/ initialisiert
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_ls_empty/remote.git/ initialisiert
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_ls_populated/wc'...
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_branch_m/wc'...
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_no_file/wc'...
+test workflow::aur_git::tests::ls_remote_empty_bare_has_no_refs ... ok
+test workflow::aur_git::tests::remote_tree_has_pkgbuild_false_on_empty_bare ... ok
+test workflow::build::updpkgsums_tests::balanced_parens_multi_element ... ok
+Warnung: Sie scheinen ein leeres Repository geklont zu haben.
+test workflow::build::updpkgsums_tests::equivalent_ignores_checksum_whitespace_and_quotes ... ok
+Warnung: Sie scheinen ein leeres Repository geklont zu haben.
+Warnung: Sie scheinen ein leeres Repository geklont zu haben.
+Warnung: Sie scheinen ein leeres Repository geklont zu haben.
+test workflow::build::updpkgsums_tests::not_equivalent_when_hash_changes ... ok
+test workflow::package::kind_suffix_hint_tests::bin_with_bin_suffix_no_hint ... ok
+Leeres Git-Repository in /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_yes/remote.git/ initialisiert
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_yes/wc'...
+test i18n::tests::disk_overrides_embedded_for_en_us ... ok
+test workflow::package::kind_suffix_hint_tests::empty_id_no_hint ... ok
+test workflow::package::kind_suffix_hint_tests::git_with_git_suffix_no_hint ... ok
+test workflow::aur_git::tests::ensure_named_master_branch_renames_main ... ok
+test workflow::package::kind_suffix_hint_tests::other_kind_never_hints ... ok
+Warnung: Sie scheinen ein leeres Repository geklont zu haben.
+test i18n::tests::locale_yaml_files_share_identical_key_sets ... ok
+test workflow::package::pkgbuild_stale_tests::day_or_older_warns ... ok
+test ui::home::tests::last_updated_line_minutes_ago ... ok
+test workflow::package::pkgbuild_stale_tests::missing_timestamp_warns ... ok
+test ui::home::tests::last_updated_line_never ... ok
+test workflow::package::kind_suffix_hint_tests::bin_without_suffix_hint ... ok
+test workflow::package::kind_suffix_hint_tests::git_without_suffix_hint ... ok
+test ui::manage::bulk_upstream_report_tests::bulk_report_outdated_appends_diff_block ... ok
+test ui::manage::bulk_upstream_report_tests::bulk_report_aligns_columns_with_pipe_separators ... ok
+test workflow::package::pkgbuild_stale_tests::within_day_no_warn ... ok
+test workflow::pkgbase::tests::validate_rejects_empty ... ok
+test workflow::pkgbase::tests::validate_accepts_common_pkgbases ... ok
+test workflow::pkgbase::tests::validate_rejects_upper_and_space ... ok
+test workflow::pkgbuild_diff::tests::identical_buffers_empty_diff ... ok
+test workflow::pkgbuild_diff::tests::pure_insertion_appends_line_index ... ok
+test workflow::pkgbuild_diff::tests::single_line_replacement_tracks_insert_and_remove ... ok
+test workflow::pkgbuild_diff::tests::unified_local_vs_upstream_shows_pkgver_change ... ok
+test workflow::pkgbuild_edit::tests::maintainer_round_trip ... ok
+test workflow::pkgbuild_edit::tests::merge_inserts_before_package ... ok
+test workflow::pkgbuild_edit::tests::merge_multiline_optdepends_replaces_full_block ... ok
+test workflow::pkgbuild_edit::tests::parse_depends_array ... ok
+test workflow::pkgbuild_edit::tests::merge_pkgver_replaces_in_place ... ok
+test workflow::pkgbuild_edit::tests::parse_depends_keeps_spaces_inside_quotes ... ok
+test workflow::pkgbuild_edit::tests::starter_pkgbuild_contains_pkgbase_and_package ... ok
+test workflow::pkgbuild_edit::tests::parse_optdepends_array ... ok
+test workflow::pkgbuild_edit::tests::parse_multiline_optdepends ... ok
+test workflow::preflight::base_devel_tool_check_tests::group_members_empty_not_satisfied ... ok
+test workflow::preflight::base_devel_tool_check_tests::group_members_non_empty_satisfies ... ok
+test workflow::preflight::base_devel_tool_check_tests::group_query_error_surfaces ... ok
+test workflow::preflight::first_devtools_tests::falls_back_to_second_binary ... ok
+test workflow::preflight::first_devtools_tests::prefers_pkgctl_when_present ... ok
+test workflow::preflight::first_devtools_tests::returns_none_when_all_absent ... ok
+test workflow::preflight::base_devel_tool_check_tests::metapackage_satisfies_without_group_query ... ok
+test workflow::preflight::nonempty_lines_tests::keeps_nonempty_trimmed_lines ... ok
+test workflow::ssh_setup::tests::aur_account_edit_url_builds_path ... ok
+test workflow::ssh_setup::tests::aur_account_edit_url_rejects_empty_and_unsafe ... ok
+test workflow::ssh_setup::tests::extract_fps_from_homepage_snippet ... ok
+test workflow::ssh_setup::tests::format_ssh_add_agent_access_error_adds_sock_hint ... ok
+test workflow::ssh_setup::tests::format_ssh_add_agent_access_error_pass_through_unrelated ... ok
+test workflow::ssh_setup::tests::normalize_pubkey_drops_hash_lines ... ok
+test workflow::ssh_setup::tests::normalize_pubkey_trims_and_joins ... ok
+test workflow::ssh_setup::tests::parse_ssh_agent_sh_output_sample ... ok
+test workflow::ssh_setup::tests::sha256_token_from_lf_parses_openssh_line ... ok
+test workflow::pkgbuild_edit::tests::ensure_starter_pkgbuild_writes_then_skips ... ok
+test workflow::ssh_setup::tests::upsert_appends_to_existing_config ... ok
+test workflow::ssh_setup::tests::upsert_replaces_existing_aur_block ... ok
+test workflow::sync::tests::package_dir_absolute_destination_ignores_work_dir ... ok
+test workflow::sync::tests::package_dir_defaults_to_id ... ok
+test workflow::sync::tests::package_dir_needs_work_dir_without_destination ... ok
+test workflow::sync::tests::package_dir_uses_sync_subdir_when_no_destination ... ok
+test workflow::sync::tests::pkgbuild_url_precheck_rejects_empty_and_bad_scheme ... ok
+test workflow::sync::tests::validate_accepts_nested ... ok
+test workflow::sync::tests::validate_destination_accepts_absolute ... ok
+test workflow::sync::tests::validate_destination_rejects_dot_dot_component ... ok
+test workflow::sync::tests::validate_destination_rejects_relative ... ok
+test workflow::sync::tests::probe_pkgbuild_url_rejects_empty ... ok
+test workflow::sync::tests::probe_pkgbuild_url_rejects_non_http_scheme ... ok
+test workflow::sync::tests::validate_rejects_parent_dir ... ok
+test workflow::validate::tab_summary_tests::required_tier_all_pass_false_on_empty ... ok
+test workflow::ssh_setup::tests::upsert_creates_block_in_empty_file ... ok
+test workflow::validate::tab_summary_tests::required_tier_all_pass_true_only_when_all_pass ... ok
+test workflow::pkgbuild_edit::tests::starter_pkgbuild_passes_bash_n ... ok
+[main (Root-Commit) 3b1bd48] init
+To file:///mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_ls_populated/remote.git
+ * [new branch]      HEAD -> master
+test workflow::aur_git::tests::ls_remote_sees_master_on_populated_bare ... ok
+[master (Root-Commit) 6751bcc] first
+[main (Root-Commit) 3b1bd48] init
+To file:///mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_no_file/remote.git
+ * [new branch]      HEAD -> master
+To file:///mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_integrate_ff_behind/remote.git
+ * [new branch]      master -> master
+Branch 'master' folgt nun 'origin/master'.
+Klone nach '/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_integrate_ff_behind/wc_b'...
+test workflow::aur_git::tests::remote_tree_has_pkgbuild_false_when_commit_has_no_pkgbuild ... ok
+[main (Root-Commit) 9b06e6f] add pkgbuild
+ 1 file changed, 7 insertions(+)
+ create mode 100644 PKGBUILD
+To file:///mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_remote_pkgbuild_yes/remote.git
+ * [new branch]      HEAD -> master
+test workflow::aur_git::tests::remote_tree_has_pkgbuild_true_when_remote_has_pkgbuild ... ok
+[master b8eaf18] second
+To file:///mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/target/aur_git_test_integrate_ff_behind/remote.git
+   6751bcc..b8eaf18  master -> master
+test workflow::aur_git::tests::integrate_fast_forward_when_behind_after_fetch ... ok
+
+test result: ok. 100 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1049 security advisories (from /home/firstpick/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (257 crate dependencies)
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:18:6
+   │
+18 │     "BSD-2-Clause",
+   │      ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:34:6
+   │
+34 │     "CDLA-Permissive-2.0",
+   │      ━━━━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:31:6
+   │
+31 │     "GPL-3.0-or-later",
+   │      ━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:28:6
+   │
+28 │     "LGPL-2.0-or-later",
+   │      ━━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:29:6
+   │
+29 │     "LGPL-2.1-or-later",
+   │      ━━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:30:6
+   │
+30 │     "LGPL-3.0-or-later",
+   │      ━━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:26:6
+   │
+26 │     "OpenSSL",
+   │      ━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:23:6
+   │
+23 │     "Unicode-DFS-2016",
+   │      ━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:36:6
+   │
+36 │     "LicenseRef-UoI-NCSA",
+   │      ━━━━━━━━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/deny.toml:35:6
+   │
+35 │     "LicenseRef-ring",
+   │      ━━━━━━━━━━━━━━━ unmatched license allowance
+
+advisories ok, bans ok, licenses ok, sources ok
+[90m12:26AM[0m [32mINF[0m [1m27 commits scanned.[0m
+[90m12:26AM[0m [32mINF[0m [1mscanned ~1393729 bytes (1.39 MB) in 126ms[0m
+[90m12:26AM[0m [32mINF[0m [1mno leaks found[0m
+[0;32m[SUCCESS] [0mAll quality and security checks completed
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Building release binary[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+    Finished `release` profile [optimized] target(s) in 0.12s
+[0;32m[SUCCESS] [0mRelease binary built
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Committing and pushing changes[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
