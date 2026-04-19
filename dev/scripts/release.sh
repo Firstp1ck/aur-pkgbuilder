@@ -1,4 +1,39 @@
 #!/usr/bin/env bash
+#
+# Workflow when you run this script (default: full release from phase 1):
+#
+#   • Startup — Write a mirrored log under dev/RELEASE/, verify tools and repo
+#     preflight (clean tree / branch), resolve AUR clone paths (and optional wiki
+#     clone). With --from-phase 5, only lighter checks run; phases 1–4 are skipped.
+#
+#   • Phase 1 — Set the new version in Cargo.toml and run cargo check so Cargo.lock
+#     updates.
+#
+#   • Phase 2 — Documentation pass: you complete the IDE release-notes flow
+#     (Release-docs/RELEASE_v<ver>.md); the script merges that into CHANGELOG.md,
+#     generates dev/ANNOUNCEMENTS content, optionally runs update_version_announcement.py,
+#     then pauses for README and wiki update flows; on major/minor bumps, SECURITY.md
+#     is updated in-repo.
+#
+#   • Phase 3 — Bump pkgver (and pkgrel per --pkgrel or prompt) in your local
+#     aur-pkgbuilder-bin PKGBUILD clone, and in aur-pkgbuilder-git when that path is
+#     enabled (SKIP_AUR_GIT_PROCESS=false).
+#
+#   • Phase 4 — Quality gates (fmt, clippy, tests, check, cargo audit, cargo deny,
+#     gitleaks), cargo build --release, then git commit + push, git tag v<ver> + push.
+#     Pushing the tag triggers .github/workflows/release.yml on GitHub Actions, which
+#     builds per-arch binaries and publishes the GitHub Release (no local gh release).
+#
+#   • Phase 5 — After CI finishes, refresh SHA256 sums in the AUR -bin clone via
+#     update-sha256sums.sh, push AUR packages with aur-push.sh, copy PKGBUILD(s) back
+#     into this repo (PKGBUILD-bin / PKGBUILD-git) and push, then commit/push the
+#     wiki clone when AUR_PKGBUILDER_WIKI_DIR is set.
+#
+#   • End — Release report finalized under dev/RELEASE/.
+#
+# With --from-phase 5, only the Phase 5 block runs (for a version whose tag and CI
+# artifacts already exist). --dry-run prints what would run without mutating state.
+#
 # release.sh - Automated version release script for aur-pkgbuilder
 #
 # What: Bash equivalent of dev/scripts/release.fish.
@@ -44,7 +79,7 @@ DRY_RUN=false
 # AUR PKGBUILD pkgrel handling in phase 3: reset | keep | bump (set via --pkgrel or prompt)
 PKGREL_MODE=""
 PKGREL_CLI_SET=false
-SKIP_AUR_BIN_PROCESS=false
+SKIP_AUR_BIN_PROCESS=true
 # This repository maintains aur-pkgbuilder-bin only; set to false if you add a -git AUR package.
 SKIP_AUR_GIT_PROCESS=true
 SKIP_WIKI_PROCESS=false
