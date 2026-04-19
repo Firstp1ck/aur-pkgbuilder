@@ -20,9 +20,9 @@
 #     enabled (SKIP_AUR_GIT_PROCESS=false).
 #
 #   • Phase 4 — Quality gates (fmt, clippy, tests, check, cargo audit, cargo deny,
-#     gitleaks), cargo build --release, then git commit + push, git tag v<ver> + push.
-#     Pushing the tag triggers .github/workflows/release.yml on GitHub Actions, which
-#     builds per-arch binaries and publishes the GitHub Release (no local gh release).
+#     gitleaks), cargo build --release, then git commit + push, annotated git tag v<ver> + push.
+#     The tag message comes from Release-docs/RELEASE_v<ver>.md when present (GitHub Actions
+#     reads it via git show for the release body). Pushing the tag triggers release.yml.
 #
 #   • Phase 5 — After CI finishes, refresh SHA256 sums in the AUR -bin clone via
 #     update-sha256sums.sh, push AUR packages with aur-push.sh, copy PKGBUILD(s) back
@@ -57,6 +57,7 @@
 #   AUR_PKGBUILDER_AUR_BIN_DIR   Directory of the aur-pkgbuilder-bin AUR git clone (must contain PKGBUILD)
 #   AUR_PKGBUILDER_AUR_GIT_DIR   Directory of an optional *-git AUR clone (this repo ships -bin only by default)
 #   AUR_PKGBUILDER_WIKI_DIR      Wiki git clone (optional; unset/empty skips wiki push)
+#   RELEASE_TAG_FORCE_NO_GPG    If 1 or true, create the release tag with git -c tag.gpgSign=false (CI/headless)
 
 set -euo pipefail
 
@@ -213,6 +214,36 @@ dry_run_cmd() {
     return 0
   fi
   "$@"
+}
+
+# What: Create an annotated tag on HEAD with an explicit message body.
+#
+# Inputs:
+# - $1: Tag name (e.g. v0.1.0).
+# - $2: Path to Release-docs/RELEASE_v*.md when that file should supply the tag body (may be empty).
+#
+# Output:
+# - Runs git tag -a … -F or -m on success; non-zero if git tag fails.
+#
+# Details:
+# - Plain `git tag NAME` with tag.gpgSign=true creates a signed tag and opens an editor for
+#   the message; in scripts that becomes "fatal: no tag message?" and leaves no tag, so
+#   `git push origin NAME` fails with "does not match any reference".
+# - Set RELEASE_TAG_FORCE_NO_GPG=1 (or true) to run `git -c tag.gpgSign=false` for tag creation only.
+git_annotated_release_tag() {
+  local tag="${1}"
+  local release_file="${2}"
+  local -a git_cmd=(git)
+
+  if [[ "${RELEASE_TAG_FORCE_NO_GPG:-}" == "1" || "${RELEASE_TAG_FORCE_NO_GPG:-}" == "true" ]]; then
+    git_cmd=(git -c tag.gpgSign=false)
+  fi
+
+  if [[ -n "${release_file}" && -f "${release_file}" && -s "${release_file}" ]]; then
+    "${git_cmd[@]}" tag -a "${tag}" -F "${release_file}" HEAD
+  else
+    "${git_cmd[@]}" tag -a "${tag}" -m "Release ${tag}" HEAD
+  fi
 }
 
 confirm_continue() {
@@ -633,7 +664,12 @@ phase4_build_release() {
 
   log_step "Creating git tag"
   if [[ "${DRY_RUN}" == true ]]; then
-    log_info "[DRY-RUN] Would create tag: ${tag}"
+    log_info "[DRY-RUN] Would create annotated tag ${tag} on HEAD (message required for gpgSign / CI)"
+    if [[ -f "${release_file}" && -s "${release_file}" ]]; then
+      log_info "[DRY-RUN] Tag body from: ${release_file}"
+    else
+      log_info "[DRY-RUN] Tag body: default one-line message (no ${release_file})"
+    fi
   else
     if git tag -l | rg -q "^${tag}$"; then
       log_warn "Tag ${tag} already exists"
@@ -645,13 +681,24 @@ phase4_build_release() {
         return 0
       fi
     fi
-    git tag "${tag}"
-    log_success "Created tag: ${tag}"
+    if ! git_annotated_release_tag "${tag}" "${release_file}"; then
+      log_error "git tag failed. Common cause: tag.gpgSign=true without a TTY (fixed by using -a/-F here)."
+      log_error "If you must skip GPG for the tag only, run again with: RELEASE_TAG_FORCE_NO_GPG=1 ${0##*/} …"
+      return 1
+    fi
+    log_success "Created annotated tag: ${tag}"
   fi
 
   log_step "Pushing tag to GitHub"
-  dry_run_cmd git push origin "${tag}"
-  log_success "Tag pushed to GitHub"
+  if ! dry_run_cmd git push origin "${tag}"; then
+    log_error "git push origin ${tag} failed (local tag missing? try: git tag -l '${tag}')"
+    return 1
+  fi
+  if [[ "${DRY_RUN}" != true ]]; then
+    log_success "Tag pushed to GitHub"
+  else
+    log_info "[DRY-RUN] Skipped push; would have run: git push origin ${tag}"
+  fi
 
   log_step "GitHub Release (Actions workflow)"
   if [[ "${DRY_RUN}" == true ]]; then

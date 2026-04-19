@@ -1,4 +1,4 @@
-## [0.1.0] - 2026-04-19
+## [0.1.0] - 2026-04-20
 
 # Release v0.1.0
 
@@ -20,6 +20,14 @@ First tagged release of **aur-pkgbuilder**: a GTK4 / libadwaita desktop app for 
 - **From source:** See the repository README for `cargo build` / `cargo run` on Arch with GTK 4 and libadwaita 1.6+.
 
 ---
+
+# Release v0.1.0
+
+First tagged release of **aur-pkgbuilder**: a GTK4 / libadwaita desktop app for AUR maintainers to sync PKGBUILDs, bump versions, validate, build with `makepkg`, and publish from one workspace.
+
+## What's New
+
+- **End-to-end workflow** — Home, connection checks, package sync, version step, validation, `makepkg` build, and AUR Git publish, with streaming logs in the app.
 
 # Changelog
 
