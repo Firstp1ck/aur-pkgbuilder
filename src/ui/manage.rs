@@ -153,8 +153,9 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
     let row = ActionRow::builder()
         .title("Check all packages for upstream updates")
         .subtitle(
-            "Downloads each registry PKGBUILD URL and compares it to your on-disk PKGBUILD; \
-             shows a unified diff when they differ.",
+            "Fetches each registry PKGBUILD URL and compares it to the PKGBUILD already on disk \
+             under your work directory (or per-package destination). Clearing config does not \
+             delete those files — if you want a clean tree, use Sync or remove the old folders.",
         )
         .build();
     let btn = primary_button("Check all");
@@ -194,7 +195,8 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
                     .all(|(_, r)| matches!(r, Ok(UpdateStatus::UpToDate { .. })));
                 if all_match {
                     toasts_outer.add_toast(Toast::new(&format!(
-                        "All {n} package(s) match upstream PKGBUILD."
+                        "All {n} package(s): on-disk PKGBUILD matches upstream (under your work directory). \
+                         Deleting config alone does not remove those files — reuse Sync or a fresh work dir if you expected empty trees."
                     )));
                     return;
                 }
@@ -361,7 +363,7 @@ fn build_row_menu(
                 move |res| match res {
                     Ok(UpdateStatus::UpToDate { version }) => {
                         toasts.add_toast(Toast::new(&format!(
-                            "{pkg_id}: PKGBUILD matches upstream (pkgver {version})."
+                            "{pkg_id}: on-disk PKGBUILD matches upstream (pkgver {version})."
                         )));
                     }
                     Ok(UpdateStatus::Outdated {

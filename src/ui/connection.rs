@@ -12,77 +12,9 @@ use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::folder_pick;
 use crate::ui::shell::{MainShell, ProcessTab};
+use crate::ui::ssh_probe;
 use crate::workflow::aur_account::{self, ApplyAurUsernameOutcome, AurAccountError};
-use crate::workflow::preflight::{self, PackagingConfigTarget, SshProbe, ToolCheck};
-
-/// Whether we should probe AUR SSH immediately on opening this page: the user
-/// has configured a key in the app, or the conventional `~/.ssh/aur` key exists.
-pub(crate) fn ssh_likely_configured(state: &AppStateRef) -> bool {
-    let key = state.borrow().config.ssh_key.clone();
-    preflight::aur_ssh_probe_is_relevant(key.as_deref())
-}
-
-/// Runs [`preflight::probe_aur_ssh`] and updates `state.ssh_ok` plus the probe row UI.
-fn run_aur_ssh_probe(
-    shell: &MainShell,
-    state: &AppStateRef,
-    probe_status: &Label,
-    probe_spinner: &Spinner,
-    probe_btn: &Button,
-) {
-    save_config(state);
-    probe_spinner.start();
-    probe_status.set_text("probing…");
-    probe_btn.set_sensitive(false);
-    let key = state.borrow().config.ssh_key.clone();
-    let state2 = state.clone();
-    let shell2 = shell.clone();
-    let probe_status = probe_status.clone();
-    let probe_spinner = probe_spinner.clone();
-    let probe_btn2 = probe_btn.clone();
-    runtime::spawn(
-        async move {
-            match preflight::probe_aur_ssh(key.as_deref()).await {
-                Ok(probe) => Ok(probe),
-                Err(e) => Err(e.to_string()),
-            }
-        },
-        move |result| {
-            let prev_ssh = state2.borrow().ssh_ok;
-            probe_spinner.stop();
-            probe_btn2.set_sensitive(true);
-            match result {
-                Ok(SshProbe::Authenticated { banner }) => {
-                    state2.borrow_mut().ssh_ok = true;
-                    probe_status.set_text("connected");
-                    probe_status.set_tooltip_text(Some(&banner));
-                    probe_status.set_css_classes(&["success"]);
-                }
-                Ok(SshProbe::KeyRejected { banner }) => {
-                    state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text("key rejected");
-                    probe_status.set_tooltip_text(Some(&banner));
-                    probe_status.set_css_classes(&["error"]);
-                }
-                Ok(SshProbe::Failed { stderr, exit_code }) => {
-                    state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text(&format!("failed (exit {exit_code})"));
-                    probe_status.set_tooltip_text(Some(&stderr));
-                    probe_status.set_css_classes(&["error"]);
-                }
-                Err(msg) => {
-                    state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text("error");
-                    probe_status.set_tooltip_text(Some(&msg));
-                    probe_status.set_css_classes(&["error"]);
-                }
-            }
-            if prev_ssh != state2.borrow().ssh_ok {
-                shell2.refresh_publish_tab_page(&state2);
-            }
-        },
-    );
-}
+use crate::workflow::preflight::{self, PackagingConfigTarget, ToolCheck};
 
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let toasts = ToastOverlay::new();
@@ -476,7 +408,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let probe_spinner = probe_spinner.clone();
         let probe_btn_inner = probe_btn.clone();
         probe_btn.connect_clicked(move |_| {
-            run_aur_ssh_probe(
+            ssh_probe::run_aur_ssh_probe(
                 &shell,
                 &state,
                 &probe_status,
@@ -486,8 +418,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
 
-    if ssh_likely_configured(state) {
-        run_aur_ssh_probe(shell, state, &probe_status, &probe_spinner, &probe_btn);
+    if ssh_probe::ssh_likely_configured(state) {
+        ssh_probe::run_aur_ssh_probe(shell, state, &probe_status, &probe_spinner, &probe_btn);
     }
 
     {

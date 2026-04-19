@@ -12,12 +12,13 @@ use adw::{
     ActionRow, Dialog, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast,
     ToastOverlay,
 };
-use gtk4::{Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, Window};
+use gtk4::{Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, Spinner, Window};
 
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::shell::MainShell;
+use crate::ui::ssh_probe;
 use crate::workflow::aur_account::{self, ApplyAurUsernameOutcome, AurAccountError};
 use crate::workflow::ssh_setup::{
     self, ConfigState, FullSetupReport, KeyState, KnownHostsState, SshKey, SshSetupError,
@@ -67,7 +68,8 @@ pub fn build(
     content.append(&heading);
     content.append(&sub);
 
-    content.append(&one_click_group(state, &toasts));
+    let keys_list = ui::boxed_list_box();
+    content.append(&one_click_group(state, &toasts, &keys_list));
 
     let keys_title = Label::builder()
         .label("Your SSH keys")
@@ -83,13 +85,15 @@ pub fn build(
         .build();
     content.append(&keys_title);
     content.append(&keys_desc);
-    let keys_list = ui::boxed_list_box();
     content.append(&keys_list);
     refresh_keys_group(&keys_list, state, &toasts);
 
     content.append(&key_group(state, &toasts, &keys_list));
     content.append(&publish_group(state, &toasts, shell));
     content.append(&connectivity_group(state, &toasts));
+    if flavor == SshSetupFlavor::FromOnboarding {
+        content.append(&aur_ssh_probe_section(shell, state));
+    }
     content.append(&done_row(nav, &toasts, flavor));
 
     toasts.set_child(Some(&content));
@@ -100,7 +104,7 @@ pub fn build(
 // Section: one-click setup
 // ---------------------------------------------------------------------------
 
-fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
+fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) -> ListBox {
     let row = ActionRow::builder()
         .title("Set up key + config + known_hosts")
         .subtitle("Creates ~/.ssh/aur, adds a Host block, pins the AUR host key.")
@@ -114,18 +118,22 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
 
     let state = state.clone();
     let toasts = toasts.clone();
+    let keys_list = keys_list.clone();
     btn.connect_clicked(move |btn| {
         btn.set_sensitive(false);
         let comment = whoami_comment();
         let state_cb = state.clone();
         let toasts_cb = toasts.clone();
+        let keys_list_cb = keys_list.clone();
         let btn_cb = btn.clone();
         runtime::spawn(
             async move { ssh_setup::full_setup(&comment).await },
             move |res| {
                 btn_cb.set_sensitive(true);
                 match res {
-                    Ok(report) => apply_full_setup(&state_cb, &toasts_cb, report),
+                    Ok(report) => {
+                        apply_full_setup(&state_cb, &toasts_cb, &keys_list_cb, report);
+                    }
                     Err(err) => toasts_cb.add_toast(Toast::new(&format!("Setup failed: {err}"))),
                 }
             },
@@ -145,9 +153,15 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
     )
 }
 
-fn apply_full_setup(state: &AppStateRef, toasts: &ToastOverlay, report: FullSetupReport) {
+fn apply_full_setup(
+    state: &AppStateRef,
+    toasts: &ToastOverlay,
+    keys_list: &ListBox,
+    report: FullSetupReport,
+) {
     state.borrow_mut().config.ssh_key = Some(report.key.private_path.clone());
     let _ = state.borrow().config.save();
+    refresh_keys_group(keys_list, state, toasts);
 
     let mut lines: Vec<String> = Vec::with_capacity(3);
     lines.push(match report.key_state {
@@ -197,7 +211,7 @@ fn refresh_keys_group(list: &ListBox, state: &AppStateRef, toasts: &ToastOverlay
         }
         Ok(keys) => {
             for key in keys {
-                list.append(&render_key_row(&state, &toasts, &key));
+                list.append(&render_key_row(&list, &state, &toasts, &key));
             }
         }
         Err(err) => {
@@ -206,7 +220,12 @@ fn refresh_keys_group(list: &ListBox, state: &AppStateRef, toasts: &ToastOverlay
     });
 }
 
-fn render_key_row(state: &AppStateRef, toasts: &ToastOverlay, key: &SshKey) -> ActionRow {
+fn render_key_row(
+    keys_list: &ListBox,
+    state: &AppStateRef,
+    toasts: &ToastOverlay,
+    key: &SshKey,
+) -> ActionRow {
     let selected = state
         .borrow()
         .config
@@ -245,16 +264,93 @@ fn render_key_row(state: &AppStateRef, toasts: &ToastOverlay, key: &SshKey) -> A
     row.add_suffix(&use_btn);
 
     let path = key.private_path.clone();
+    let keys_list = keys_list.clone();
     let state = state.clone();
     let toasts = toasts.clone();
-    use_btn.connect_clicked(move |btn| {
+    use_btn.connect_clicked(move |_btn| {
         state.borrow_mut().config.ssh_key = Some(path.clone());
         let _ = state.borrow().config.save();
-        btn.set_label("Selected");
-        btn.set_sensitive(false);
+        refresh_keys_group(&keys_list, &state, &toasts);
         toasts.add_toast(Toast::new("SSH key selected for AUR"));
     });
     row
+}
+
+// ---------------------------------------------------------------------------
+// SSH agent rows — visible stamp + longer toasts (overlay sits in a scroller).
+// ---------------------------------------------------------------------------
+
+const SSH_AGENT_TOAST_TIMEOUT_SECS: u32 = 12;
+
+const STARTED_EMBEDDED_AGENT_TOAST: &str =
+    "Started a new ssh-agent for this session (no desktop agent was reachable).";
+
+/// What: Shows a toast that stays on screen long enough to read after ssh-agent ops.
+fn add_ssh_notice_toast(toasts: &ToastOverlay, message: &str) {
+    let toast = Toast::new(message);
+    toast.set_timeout(SSH_AGENT_TOAST_TIMEOUT_SECS);
+    toasts.add_toast(toast);
+}
+
+/// What: Marks a row as busy before `ssh-add` runs asynchronously.
+fn pulse_ssh_row_stamp(label: &Label, running: &str) {
+    label.set_visible(true);
+    label.set_text(running);
+    label.remove_css_class("success");
+    label.remove_css_class("error");
+    label.set_css_classes(&["dim-label"]);
+    label.set_tooltip_text(None::<&str>);
+}
+
+/// What: Writes a short per-row result next to **Check agent** / **ssh-add**.
+fn stamp_ssh_op_row(label: &Label, ok: bool, summary: &str, tooltip: Option<&str>) {
+    label.set_visible(true);
+    label.set_text(summary);
+    label.remove_css_class("success");
+    label.remove_css_class("error");
+    label.remove_css_class("dim-label");
+    label.add_css_class(if ok { "success" } else { "error" });
+    label.set_tooltip_text(tooltip);
+}
+
+/// What: One-line summary for `ssh-add -l` output plus optional tooltip of the full listing.
+fn summarize_agent_listing(text: &str) -> (String, Option<String>) {
+    let t = text.trim();
+    if t.is_empty() {
+        return ("(no output)".to_string(), None);
+    }
+    let lower = t.to_lowercase();
+    if lower.contains("no identities") || lower.contains("no keys loaded") {
+        return ("No keys in agent".to_string(), Some(t.to_string()));
+    }
+    let lines: Vec<&str> = t.lines().filter(|l| !l.trim().is_empty()).collect();
+    let n = lines.len();
+    let summary = match n {
+        0 => "(no output)".to_string(),
+        1 => "1 key in agent".to_string(),
+        _ => format!("{n} keys in agent"),
+    };
+    (summary, Some(t.to_string()))
+}
+
+/// What: Short label for a successful `ssh-add <key>` (OpenSSH often prints only to stderr).
+fn summarize_ssh_add_ok(msg: &str) -> (String, Option<String>) {
+    let t = msg.trim();
+    if t.is_empty() {
+        return ("Added to agent".to_string(), None);
+    }
+    let first = t.lines().next().unwrap_or("").trim();
+    if first.len() <= 48 {
+        let tip = if t.lines().count() > 1 {
+            Some(t.to_string())
+        } else {
+            None
+        };
+        (first.to_string(), tip)
+    } else {
+        let shortened: String = first.chars().take(45).collect();
+        (format!("{shortened}…"), Some(t.to_string()))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -271,12 +367,39 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
+    let ensure_feedback = Label::builder()
+        .margin_end(6)
+        .css_classes(vec!["dim-label"])
+        .build();
+    ensure_feedback.set_visible(false);
+    row.add_suffix(&ensure_feedback);
     row.add_suffix(&btn);
+
+    let add_row = ActionRow::builder()
+        .title("Load selected key into ssh-agent")
+        .subtitle(
+            "Runs ssh-add on the key from your config (empty-passphrase keys work non-interactively). \
+             The Check agent row below is refreshed automatically after a successful add.",
+        )
+        .build();
+    let add_btn = Button::builder()
+        .label("ssh-add")
+        .valign(Align::Center)
+        .css_classes(vec!["pill"])
+        .build();
+    let add_feedback = Label::builder()
+        .margin_end(6)
+        .css_classes(vec!["dim-label"])
+        .build();
+    add_feedback.set_visible(false);
+    add_row.add_suffix(&add_feedback);
+    add_row.add_suffix(&add_btn);
 
     let agent_row = ActionRow::builder()
         .title("List keys in ssh-agent")
         .subtitle(
-            "Runs ssh-add -l so you can confirm the AUR key is loaded when using a passphrase.",
+            "Runs ssh-add -l. If the desktop has no SSH_AUTH_SOCK, the first run can start ssh-agent -s \
+             and keep that socket for this app session.",
         )
         .build();
     let agent_btn = Button::builder()
@@ -284,53 +407,122 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
+    let agent_feedback = Label::builder()
+        .margin_end(6)
+        .css_classes(vec!["dim-label"])
+        .build();
+    agent_feedback.set_visible(false);
+    agent_row.add_suffix(&agent_feedback);
     agent_row.add_suffix(&agent_btn);
-
-    {
-        let toasts = toasts.clone();
-        agent_btn.connect_clicked(move |btn| {
-            btn.set_sensitive(false);
-            let toasts_cb = toasts.clone();
-            let btn_cb = btn.clone();
-            runtime::spawn(ssh_setup::list_ssh_agent_keys(), move |res| {
-                btn_cb.set_sensitive(true);
-                match res {
-                    Ok(text) => toasts_cb.add_toast(Toast::new(&text)),
-                    Err(err) => toasts_cb.add_toast(Toast::new(&format!("{err}"))),
-                }
-            });
-        });
-    }
-
-    let add_row = ActionRow::builder()
-        .title("Load selected key into ssh-agent")
-        .subtitle("Runs ssh-add on the key from your config (empty-passphrase keys work non-interactively).")
-        .build();
-    let add_btn = Button::builder()
-        .label("ssh-add")
-        .valign(Align::Center)
-        .css_classes(vec!["pill"])
-        .build();
-    add_row.add_suffix(&add_btn);
 
     {
         let state = state.clone();
         let toasts = toasts.clone();
+        let add_feedback = add_feedback.clone();
+        let agent_feedback = agent_feedback.clone();
         add_btn.connect_clicked(move |btn| {
             let Some(private) = state.borrow().config.ssh_key.clone() else {
                 toasts.add_toast(Toast::new("Select an SSH key first."));
                 return;
             };
+            pulse_ssh_row_stamp(&add_feedback, "Adding…");
             btn.set_sensitive(false);
+            let session = state.borrow().ssh_agent_session.clone();
             let toasts_cb = toasts.clone();
             let btn_cb = btn.clone();
+            let add_feedback_cb = add_feedback.clone();
+            let state_inner = state.clone();
+            let agent_feedback_refresh = agent_feedback.clone();
             runtime::spawn(
-                async move { ssh_setup::ssh_add_private_key(&private).await },
+                async move {
+                    ssh_setup::ssh_add_private_key_or_start_session(&private, session.as_ref())
+                        .await
+                },
                 move |res| {
                     btn_cb.set_sensitive(true);
                     match res {
-                        Ok(msg) => toasts_cb.add_toast(Toast::new(&msg)),
-                        Err(err) => toasts_cb.add_toast(Toast::new(&format!("{err}"))),
+                        Ok((msg, maybe_env)) => {
+                            if let Some(env) = maybe_env {
+                                state_inner.borrow_mut().ssh_agent_session = Some(env);
+                                add_ssh_notice_toast(&toasts_cb, STARTED_EMBEDDED_AGENT_TOAST);
+                            }
+                            let (summary, tip) = summarize_ssh_add_ok(&msg);
+                            stamp_ssh_op_row(&add_feedback_cb, true, &summary, tip.as_deref());
+                            add_ssh_notice_toast(&toasts_cb, &msg);
+
+                            let sess = state_inner.borrow().ssh_agent_session.clone();
+                            let agent_fb = agent_feedback_refresh.clone();
+                            let toasts_r = toasts_cb.clone();
+                            runtime::spawn(
+                                async move {
+                                    ssh_setup::list_ssh_agent_keys_with_session_only(sess.as_ref())
+                                        .await
+                                },
+                                move |list_res| match list_res {
+                                    Ok(text) => {
+                                        let (s, t) = summarize_agent_listing(&text);
+                                        stamp_ssh_op_row(&agent_fb, true, &s, t.as_deref());
+                                    }
+                                    Err(err) => {
+                                        let detail = format!("{err}");
+                                        stamp_ssh_op_row(
+                                            &agent_fb,
+                                            false,
+                                            "List refresh failed",
+                                            Some(&detail),
+                                        );
+                                        add_ssh_notice_toast(
+                                            &toasts_r,
+                                            &format!("Could not refresh agent list: {detail}"),
+                                        );
+                                    }
+                                },
+                            );
+                        }
+                        Err(err) => {
+                            let detail = format!("{err}");
+                            stamp_ssh_op_row(&add_feedback_cb, false, "Failed", Some(&detail));
+                            add_ssh_notice_toast(&toasts_cb, &detail);
+                        }
+                    }
+                },
+            );
+        });
+    }
+
+    {
+        let state_cb = state.clone();
+        let toasts = toasts.clone();
+        let agent_feedback = agent_feedback.clone();
+        agent_btn.connect_clicked(move |btn| {
+            pulse_ssh_row_stamp(&agent_feedback, "Checking…");
+            btn.set_sensitive(false);
+            let session = state_cb.borrow().ssh_agent_session.clone();
+            let toasts_cb = toasts.clone();
+            let btn_cb = btn.clone();
+            let agent_feedback_cb = agent_feedback.clone();
+            let state_inner = state_cb.clone();
+            runtime::spawn(
+                async move {
+                    ssh_setup::list_ssh_agent_keys_or_start_session(session.as_ref()).await
+                },
+                move |res| {
+                    btn_cb.set_sensitive(true);
+                    match res {
+                        Ok((text, maybe_env)) => {
+                            if let Some(env) = maybe_env {
+                                state_inner.borrow_mut().ssh_agent_session = Some(env);
+                                add_ssh_notice_toast(&toasts_cb, STARTED_EMBEDDED_AGENT_TOAST);
+                            }
+                            let (summary, tip) = summarize_agent_listing(&text);
+                            stamp_ssh_op_row(&agent_feedback_cb, true, &summary, tip.as_deref());
+                            add_ssh_notice_toast(&toasts_cb, &text);
+                        }
+                        Err(err) => {
+                            let detail = format!("{err}");
+                            stamp_ssh_op_row(&agent_feedback_cb, false, "Failed", Some(&detail));
+                            add_ssh_notice_toast(&toasts_cb, &detail);
+                        }
                     }
                 },
             );
@@ -340,31 +532,40 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
     let state = state.clone();
     let toasts = toasts.clone();
     let keys_list = keys_list.clone();
+    let ensure_key_feedback = ensure_feedback.clone();
     btn.connect_clicked(move |btn| {
+        pulse_ssh_row_stamp(&ensure_key_feedback, "Working…");
         btn.set_sensitive(false);
         let comment = whoami_comment();
         let state_cb = state.clone();
         let toasts_cb = toasts.clone();
         let keys_list_cb = keys_list.clone();
         let btn_cb = btn.clone();
+        let ensure_feedback_cb = ensure_key_feedback.clone();
         runtime::spawn(
             async move { ssh_setup::ensure_aur_key(&comment).await },
             move |res| {
                 btn_cb.set_sensitive(true);
                 match res {
                     Ok((key, KeyState::Generated)) => {
+                        let path = key.private_path.display().to_string();
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
                         let _ = state_cb.borrow().config.save();
                         refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
+                        stamp_ssh_op_row(&ensure_feedback_cb, true, "Generated", Some(&path));
                         toasts_cb.add_toast(Toast::new("Generated ~/.ssh/aur"));
                     }
                     Ok((key, KeyState::Reused)) => {
+                        let path = key.private_path.display().to_string();
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
                         let _ = state_cb.borrow().config.save();
                         refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
+                        stamp_ssh_op_row(&ensure_feedback_cb, true, "Reused", Some(&path));
                         toasts_cb.add_toast(Toast::new("Reused existing ~/.ssh/aur"));
                     }
                     Err(err) => {
+                        let detail = format!("{err}");
+                        stamp_ssh_op_row(&ensure_feedback_cb, false, "Failed", Some(&detail));
                         toasts_cb.add_toast(Toast::new(&format!("Key setup failed: {err}")));
                     }
                 }
@@ -381,8 +582,8 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&row);
-            exp.add_row(&agent_row);
             exp.add_row(&add_row);
+            exp.add_row(&agent_row);
         },
     )
 }
@@ -727,6 +928,67 @@ fn publish_group(state: &AppStateRef, toasts: &ToastOverlay, shell: &MainShell) 
 }
 
 // ---------------------------------------------------------------------------
+// Section: AUR SSH probe (onboarding tail)
+// ---------------------------------------------------------------------------
+
+/// What: Same “Test SSH connection” row as the Connection tab, appended after connectivity steps.
+///
+/// Inputs:
+/// - `shell` / `state`: same as [`build`].
+///
+/// Output:
+/// - A boxed preferences section suitable to append before [`done_row`].
+///
+/// Details:
+/// - Auto-runs the probe when a key is already configured, matching Connection behavior.
+fn aur_ssh_probe_section(shell: &MainShell, state: &AppStateRef) -> ListBox {
+    let probe_row = ActionRow::builder()
+        .title("Test SSH connection")
+        .subtitle("ssh -T aur@aur.archlinux.org")
+        .build();
+    let probe_status = Label::builder().css_classes(vec!["dim-label"]).build();
+    let probe_spinner = Spinner::new();
+    let probe_btn = Button::builder()
+        .label("Run test")
+        .valign(Align::Center)
+        .css_classes(vec!["pill"])
+        .build();
+    probe_row.add_suffix(&probe_status);
+    probe_row.add_suffix(&probe_spinner);
+    probe_row.add_suffix(&probe_btn);
+
+    {
+        let shell = shell.clone();
+        let state = state.clone();
+        let probe_status = probe_status.clone();
+        let probe_spinner = probe_spinner.clone();
+        let probe_btn_inner = probe_btn.clone();
+        probe_btn.connect_clicked(move |_| {
+            ssh_probe::run_aur_ssh_probe(
+                &shell,
+                &state,
+                &probe_status,
+                &probe_spinner,
+                &probe_btn_inner,
+            );
+        });
+    }
+
+    if ssh_probe::ssh_likely_configured(state) {
+        ssh_probe::run_aur_ssh_probe(shell, state, &probe_status, &probe_spinner, &probe_btn);
+    }
+
+    ui::collapsible_preferences_section(
+        "Verify with AUR server",
+        Some("A successful probe means your SSH key is registered on the AUR."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&probe_row);
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Section: connectivity
 // ---------------------------------------------------------------------------
 
@@ -743,31 +1005,52 @@ fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
+    let trust_feedback = Label::builder()
+        .margin_end(6)
+        .css_classes(vec!["dim-label"])
+        .build();
+    trust_feedback.set_visible(false);
+    trust_row.add_suffix(&trust_feedback);
     trust_row.add_suffix(&trust_btn);
 
     {
         let toasts = toasts.clone();
+        let trust_feedback = trust_feedback.clone();
         trust_btn.connect_clicked(move |btn| {
+            pulse_ssh_row_stamp(&trust_feedback, "Updating…");
             btn.set_sensitive(false);
-            let toasts = toasts.clone();
+            let toasts_cb = toasts.clone();
             let btn_cb = btn.clone();
+            let trust_feedback_cb = trust_feedback.clone();
             runtime::spawn(ssh_setup::ensure_known_hosts_entry(), move |res| {
                 btn_cb.set_sensitive(true);
                 match res {
                     Ok(KnownHostsState::AlreadyPresent) => {
-                        toasts.add_toast(Toast::new("AUR already trusted in known_hosts"));
+                        stamp_ssh_op_row(
+                            &trust_feedback_cb,
+                            true,
+                            "Already trusted",
+                            Some("AUR host keys already present in known_hosts."),
+                        );
+                        toasts_cb.add_toast(Toast::new("AUR already trusted in known_hosts"));
                     }
                     Ok(KnownHostsState::Added { fingerprints }) => {
-                        toasts.add_toast(Toast::new("AUR host keys added to known_hosts"));
+                        let tip = (!fingerprints.is_empty()).then(|| fingerprints.join("\n"));
+                        stamp_ssh_op_row(&trust_feedback_cb, true, "Keys added", tip.as_deref());
+                        toasts_cb.add_toast(Toast::new("AUR host keys added to known_hosts"));
                         for fp in fingerprints {
-                            toasts.add_toast(Toast::new(&fp));
+                            toasts_cb.add_toast(Toast::new(&fp));
                         }
                     }
                     Err(SshSetupError::NotImplemented(what)) => {
-                        toasts.add_toast(Toast::new(&format!("Coming soon: {what}")));
+                        let detail = format!("Coming soon: {what}");
+                        stamp_ssh_op_row(&trust_feedback_cb, false, "N/A", Some(&detail));
+                        toasts_cb.add_toast(Toast::new(&detail));
                     }
                     Err(err) => {
-                        toasts.add_toast(Toast::new(&format!("Failed: {err}")));
+                        let detail = format!("{err}");
+                        stamp_ssh_op_row(&trust_feedback_cb, false, "Failed", Some(&detail));
+                        toasts_cb.add_toast(Toast::new(&format!("Failed: {err}")));
                     }
                 }
             });
@@ -783,38 +1066,75 @@ fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
+    let config_feedback = Label::builder()
+        .margin_end(6)
+        .css_classes(vec!["dim-label"])
+        .build();
+    config_feedback.set_visible(false);
+    config_row.add_suffix(&config_feedback);
     config_row.add_suffix(&config_btn);
 
     {
         let state = state.clone();
         let toasts = toasts.clone();
+        let config_feedback = config_feedback.clone();
         config_btn.connect_clicked(move |btn| {
             let Some(private) = state.borrow().config.ssh_key.clone() else {
+                stamp_ssh_op_row(
+                    &config_feedback,
+                    false,
+                    "Needs key",
+                    Some("Select or create an SSH key in the rows above."),
+                );
                 toasts.add_toast(Toast::new("Select or create an SSH key first."));
                 return;
             };
+            pulse_ssh_row_stamp(&config_feedback, "Writing…");
             btn.set_sensitive(false);
-            let toasts = toasts.clone();
+            let toasts_cb = toasts.clone();
             let btn_cb = btn.clone();
+            let config_feedback_cb = config_feedback.clone();
             runtime::spawn(
                 async move { ssh_setup::write_ssh_config_entry(&private).await },
                 move |res| {
                     btn_cb.set_sensitive(true);
                     match res {
                         Ok(ConfigState::Created) => {
-                            toasts.add_toast(Toast::new("Created ~/.ssh/config"));
+                            stamp_ssh_op_row(
+                                &config_feedback_cb,
+                                true,
+                                "Created",
+                                Some("Wrote ~/.ssh/config with the AUR Host block."),
+                            );
+                            toasts_cb.add_toast(Toast::new("Created ~/.ssh/config"));
                         }
                         Ok(ConfigState::Updated) => {
-                            toasts.add_toast(Toast::new("Updated ~/.ssh/config"));
+                            stamp_ssh_op_row(
+                                &config_feedback_cb,
+                                true,
+                                "Updated",
+                                Some("Refreshed the AUR Host block in ~/.ssh/config."),
+                            );
+                            toasts_cb.add_toast(Toast::new("Updated ~/.ssh/config"));
                         }
                         Ok(ConfigState::Unchanged) => {
-                            toasts.add_toast(Toast::new("~/.ssh/config already correct"));
+                            stamp_ssh_op_row(
+                                &config_feedback_cb,
+                                true,
+                                "Unchanged",
+                                Some("~/.ssh/config already had the correct AUR Host entry."),
+                            );
+                            toasts_cb.add_toast(Toast::new("~/.ssh/config already correct"));
                         }
                         Err(SshSetupError::NotImplemented(what)) => {
-                            toasts.add_toast(Toast::new(&format!("Coming soon: {what}")));
+                            let detail = format!("Coming soon: {what}");
+                            stamp_ssh_op_row(&config_feedback_cb, false, "N/A", Some(&detail));
+                            toasts_cb.add_toast(Toast::new(&detail));
                         }
                         Err(err) => {
-                            toasts.add_toast(Toast::new(&format!("Failed: {err}")));
+                            let detail = format!("{err}");
+                            stamp_ssh_op_row(&config_feedback_cb, false, "Failed", Some(&detail));
+                            toasts_cb.add_toast(Toast::new(&format!("Failed: {err}")));
                         }
                     }
                 },
@@ -851,7 +1171,7 @@ fn done_row(nav: &NavigationView, toasts: &ToastOverlay, flavor: SshSetupFlavor)
         ),
         SshSetupFlavor::FromOnboarding => (
             "Finish onboarding",
-            "Run the SSH probe on the connection screen to unlock publishing.",
+            "Run the SSH test above (or on Connection) if publish still says SSH is unverified.",
         ),
     };
 
@@ -894,4 +1214,39 @@ fn whoami_comment() -> String {
     let user = std::env::var("USER").unwrap_or_else(|_| "aur".to_string());
     let host = gtk4::glib::host_name().to_string();
     format!("{user}@{host} (aur-pkgbuilder)")
+}
+
+#[cfg(test)]
+mod ssh_agent_stamp_tests {
+    use super::{summarize_agent_listing, summarize_ssh_add_ok};
+
+    #[test]
+    fn summarize_agent_counts_nonempty_lines() {
+        let (s, tip) = summarize_agent_listing(
+            "4096 SHA256:ab /home/a/.ssh/id_rsa (a@h)\n4096 SHA256:cd /home/a/.ssh/id_ed25519 (b)\n",
+        );
+        assert_eq!(s, "2 keys in agent");
+        assert!(tip.is_some());
+    }
+
+    #[test]
+    fn summarize_agent_empty_agent_message() {
+        let (s, _) = summarize_agent_listing("ssh-agent has no keys loaded.");
+        assert_eq!(s, "No keys in agent");
+    }
+
+    #[test]
+    fn summarize_ssh_add_single_line_no_tooltip() {
+        let (s, tip) = summarize_ssh_add_ok("Identity added: /home/u/.ssh/id_rsa (u@h)");
+        assert!(s.contains("Identity added"));
+        assert!(tip.is_none());
+    }
+
+    #[test]
+    fn summarize_ssh_add_truncates_long_first_line() {
+        let long = format!("Identity added: {} (c)", "x".repeat(80));
+        let (s, tip) = summarize_ssh_add_ok(&long);
+        assert!(s.ends_with('…'));
+        assert!(tip.is_some());
+    }
 }

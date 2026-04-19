@@ -6,6 +6,7 @@ use std::rc::Rc;
 use crate::config::Config;
 use crate::workflow::package::PackageDef;
 use crate::workflow::registry::Registry;
+use crate::workflow::ssh_setup::SshAgentEnv;
 
 /// UI-shared mutable state. Single-threaded (`Rc<RefCell<..>>`) because it
 /// only lives on the GTK main thread.
@@ -20,6 +21,10 @@ pub struct AppState {
     /// `config.aur_username` in the last successful AUR RPC check (Connection tab apply).
     /// `None` means no check has succeeded this session, or the username was cleared.
     pub aur_account_mismatch_ids: Option<HashSet<String>>,
+    /// Bourne-style `ssh-agent -s` session started by this app when `ssh-add` had no socket.
+    ///
+    /// Subprocess-only (`SSH_AUTH_SOCK` / `SSH_AGENT_PID`); never written to config.
+    pub ssh_agent_session: Option<SshAgentEnv>,
 }
 
 pub type AppStateRef = Rc<RefCell<AppState>>;
@@ -33,6 +38,7 @@ impl AppState {
             pkgbuild_path: None,
             ssh_ok: false,
             aur_account_mismatch_ids: None,
+            ssh_agent_session: None,
         }))
     }
 

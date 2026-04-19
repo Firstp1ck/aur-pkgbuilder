@@ -29,6 +29,7 @@ Idea or bug? Open an issue on the project tracker. Contributions are welcome —
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Screenshots](#screenshots)
+  - [First launch (onboarding)](#first-launch-onboarding)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
@@ -144,6 +145,18 @@ An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is requ
 | **Persistent settings** | Working directory and SSH key path are stored at `~/.config/aur-pkgbuilder/config.jsonc` (JSONC — comments allowed). |
 
 ## Screenshots
+
+### First launch (onboarding)
+
+After a fresh install, the app opens on **Onboarding**: you enter your [aur.archlinux.org](https://aur.archlinux.org/) username (this is only for the read-only AUR RPC—no password), **Fetch** the list of packages you maintain or co-maintain, tick the rows you want in the local registry, then **Import & continue to SSH**. The next screen is **SSH setup**, where **Run setup** can create or reuse `~/.ssh/aur`, write the `Host aur.archlinux.org` block, and pin host keys; you can also copy your public key to the clipboard, open the AUR profile page to paste it, run individual steps, and **Run test** to confirm the server accepts your key.
+
+![Onboarding — sign in with AUR username, fetch maintained packages, and tick packages to import](images/Onboarding_part1_v0.1.0.png)
+
+**Part 1** shows the username field (with the pencil affordance to edit), the **Fetch** action that queries the AUR for your packages, and the checklist of results—each row shows the package name, a short description, version, and your role (maintainer or co-maintainer). **Skip setup** leaves the registry empty; **Import & continue to SSH** saves your picks and moves on.
+
+![Onboarding — SSH setup: one-click setup, keys, known_hosts, and test connection](images/Onboarding_part2_v0.1.0.png)
+
+**Part 2** is the SSH verification step bundled into onboarding: **One-click setup** runs key + `~/.ssh/config` + `known_hosts` in one go (safe to repeat—existing private keys are not overwritten). **Your SSH keys** lets you pick which key the app treats as the AUR key; lower sections cover the dedicated `~/.ssh/aur` key, copying the public key to register it on the AUR website, updating `known_hosts`, writing the config Host block, and **Test SSH connection** to confirm you see a successful probe before **Finish onboarding** returns you to Home.
 
 ### Register new AUR package
 

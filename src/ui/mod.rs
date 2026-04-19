@@ -21,6 +21,7 @@ pub mod pkgbuild_stale;
 pub mod publish;
 pub mod register;
 pub mod shell;
+pub mod ssh_probe;
 pub mod ssh_setup;
 pub mod sync;
 pub mod validate;

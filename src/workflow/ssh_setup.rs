@@ -57,6 +57,99 @@ pub enum SshSetupError {
     Other(#[from] anyhow::Error),
 }
 
+/// What: Socket path and PID printed by `ssh-agent -s` for child `ssh-add` processes.
+///
+/// Inputs:
+/// - Produced by [`parse_ssh_agent_sh_output`] from `ssh-agent` stdout.
+///
+/// Output:
+/// - Values passed as `SSH_AUTH_SOCK` and `SSH_AGENT_PID` when spawning `ssh-add`.
+///
+/// Details:
+/// - Stored in [`crate::state::AppState::ssh_agent_session`] when the app starts its own agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshAgentEnv {
+    /// Unix socket path for `SSH_AUTH_SOCK`.
+    pub ssh_auth_sock: PathBuf,
+    /// Parent `ssh-agent` PID for `SSH_AGENT_PID`.
+    pub ssh_agent_pid: u32,
+}
+
+/// What: Parses `ssh-agent -s` / `ssh-agent` bourne-shell stdout into [`SshAgentEnv`].
+///
+/// Inputs:
+/// - `stdout`: raw UTF-8 from `ssh-agent -s` (lines like `SSH_AUTH_SOCK=…; export …`).
+///
+/// Output:
+/// - `Some` when both assignments are found; `None` if either is missing or PID is not a number.
+///
+/// Details:
+/// - Values are taken from the segment before the first `;` on each assignment line.
+pub fn parse_ssh_agent_sh_output(stdout: &str) -> Option<SshAgentEnv> {
+    let mut sock: Option<PathBuf> = None;
+    let mut pid: Option<u32> = None;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("SSH_AUTH_SOCK=") {
+            let val = rest.split(';').next().unwrap_or(rest).trim();
+            if !val.is_empty() {
+                sock = Some(PathBuf::from(val));
+            }
+        } else if let Some(rest) = line.strip_prefix("SSH_AGENT_PID=") {
+            let val = rest.split(';').next().unwrap_or(rest).trim();
+            pid = val.parse().ok();
+        }
+    }
+    Some(SshAgentEnv {
+        ssh_auth_sock: sock?,
+        ssh_agent_pid: pid?,
+    })
+}
+
+fn is_unreachable_ssh_agent_error(err: &SshSetupError) -> bool {
+    let SshSetupError::Other(e) = err else {
+        return false;
+    };
+    let s = e.to_string().to_lowercase();
+    s.contains("could not open a connection to your authentication agent")
+        || s.contains("could not connect to authentication agent")
+        || s.contains("error connecting to agent")
+}
+
+/// What: Starts a detached `ssh-agent` and returns its socket + PID from stdout.
+///
+/// Output:
+/// - [`SshAgentEnv`] parsed from `ssh-agent -s` output.
+///
+/// Details:
+/// - The agent keeps running until killed; the app should reuse [`SshAgentEnv`] for later `ssh-add` calls.
+pub async fn spawn_ssh_agent_session() -> Result<SshAgentEnv, SshSetupError> {
+    let output = Command::new("ssh-agent")
+        .arg("-s")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| "spawning ssh-agent -s")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let msg = if stderr.is_empty() { stdout } else { stderr };
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "ssh-agent -s failed (status {}): {}",
+            output.status,
+            msg
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_ssh_agent_sh_output(&stdout).ok_or_else(|| {
+        SshSetupError::Other(anyhow::anyhow!(
+            "Could not parse ssh-agent -s output (expected SSH_AUTH_SOCK=… and SSH_AGENT_PID=…)."
+        ))
+    })
+}
+
 /// One detected key pair under `~/.ssh`.
 #[derive(Debug, Clone)]
 pub struct SshKey {
@@ -262,29 +355,58 @@ pub async fn open_aur_register_page() -> Result<(), SshSetupError> {
     open_https_in_browser(AUR_REGISTER_URL).await
 }
 
-/// What: List identities currently loaded in `ssh-agent`.
+/// What: Builds an error string for failed `ssh-add` / `ssh-add -l`, with extra help when no agent is reachable.
+///
+/// Inputs:
+/// - `operation`: short label such as `ssh-add -l failed`.
+/// - `detail`: trimmed stderr (or stdout) from `ssh-add`.
 ///
 /// Output:
-/// - Human-readable listing from `ssh-add -l`, or a short note when the agent is empty.
+/// - `detail` prefixed by `operation`, plus a multi-line hint when the failure is “no ssh-agent”.
 ///
 /// Details:
-/// - When `ssh-add` exits with “no identities”, this still returns `Ok` so the UI can toast it.
-pub async fn list_ssh_agent_keys() -> Result<String, SshSetupError> {
-    let output = Command::new("ssh-add")
-        .arg("-l")
+/// - Graphical sessions often start without `SSH_AUTH_SOCK`; terminal sessions started after login usually have it.
+fn format_ssh_add_agent_access_error(operation: &str, detail: &str) -> String {
+    let d = detail.to_lowercase();
+    let no_agent = d.contains("could not open a connection to your authentication agent")
+        || d.contains("could not connect to authentication agent")
+        || d.contains("error connecting to agent");
+    if no_agent {
+        format!(
+            "{operation}: {detail}\n\n\
+             Why: `ssh-add` talks to `ssh-agent` through the `SSH_AUTH_SOCK` environment variable. \
+             This process does not have a working agent socket (common when the app was started from \
+             an application menu rather than a shell where `ssh-agent` is already running).\n\n\
+             What to try: use Check agent / ssh-add in this app to start an embedded ssh-agent when \
+             needed, launch aur-pkgbuilder from a terminal that already has SSH_AUTH_SOCK, or \
+             configure your desktop session to export SSH_AUTH_SOCK into graphical applications."
+        )
+    } else {
+        format!("{operation}: {detail}")
+    }
+}
+
+async fn list_ssh_agent_keys_env(agent: Option<&SshAgentEnv>) -> Result<String, SshSetupError> {
+    let mut cmd = Command::new("ssh-add");
+    cmd.arg("-l")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .with_context(|| "spawning ssh-add -l")?;
+        .stderr(Stdio::piped());
+    if let Some(a) = agent {
+        cmd.env("SSH_AUTH_SOCK", &a.ssh_auth_sock);
+        cmd.env("SSH_AGENT_PID", a.ssh_agent_pid.to_string());
+    }
+    let output = cmd.output().await.with_context(|| "spawning ssh-add -l")?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
-        if stdout.is_empty() {
-            return Ok("(ssh-add returned no output)".into());
+        if !stdout.is_empty() {
+            return Ok(stdout);
         }
-        return Ok(stdout);
+        if !stderr.is_empty() {
+            return Ok(stderr);
+        }
+        return Ok("(ssh-add returned no output)".into());
     }
     let combined = format!("{stdout} {stderr}").to_lowercase();
     if combined.contains("no identities") {
@@ -292,42 +414,109 @@ pub async fn list_ssh_agent_keys() -> Result<String, SshSetupError> {
     }
     let msg = if stderr.is_empty() { stdout } else { stderr };
     Err(SshSetupError::Other(anyhow::anyhow!(
-        "ssh-add -l failed: {msg}"
+        "{}",
+        format_ssh_add_agent_access_error("ssh-add -l failed", &msg)
     )))
 }
 
-/// What: Load a private key into `ssh-agent` (non-interactive when the key has no passphrase).
+/// What: Re-lists identities in `ssh-agent` without starting a new agent.
 ///
 /// Inputs:
-/// - `private_key`: path to the private key file (for example `~/.ssh/aur`).
+/// - `session`: same semantics as [`list_ssh_agent_keys_or_start_session`].
 ///
 /// Output:
-/// - `Ok` with trimmed stdout when `ssh-add` succeeds.
+/// - Human-readable `ssh-add -l` text (or empty-agent message).
 ///
 /// Details:
-/// - Passphrase-protected keys need a TTY or `SSH_ASKPASS`; failures surface as errors.
-pub async fn ssh_add_private_key(private_key: &Path) -> Result<String, SshSetupError> {
-    let output = Command::new("ssh-add")
-        .arg(private_key)
+/// - Use after `ssh-add` so UI rows stay in sync; does not call [`spawn_ssh_agent_session`].
+pub async fn list_ssh_agent_keys_with_session_only(
+    session: Option<&SshAgentEnv>,
+) -> Result<String, SshSetupError> {
+    list_ssh_agent_keys_env(session).await
+}
+
+/// What: List identities in `ssh-agent`, optionally after starting one via `ssh-agent -s`.
+///
+/// Inputs:
+/// - `session`: when `Some`, `ssh-add -l` uses that socket/PID; when `None`, inherits the process environment.
+///
+/// Output:
+/// - `(listing, Some(new_session))` when a new agent was spawned because nothing was reachable.
+///
+/// Details:
+/// - On “could not open … authentication agent”, runs [`spawn_ssh_agent_session`] and retries once.
+pub async fn list_ssh_agent_keys_or_start_session(
+    session: Option<&SshAgentEnv>,
+) -> Result<(String, Option<SshAgentEnv>), SshSetupError> {
+    match list_ssh_agent_keys_env(session).await {
+        Ok(s) => Ok((s, None)),
+        Err(e) if is_unreachable_ssh_agent_error(&e) => {
+            let env = spawn_ssh_agent_session().await?;
+            let s = list_ssh_agent_keys_env(Some(&env)).await?;
+            Ok((s, Some(env)))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+async fn ssh_add_private_key_env(
+    private_key: &Path,
+    agent: Option<&SshAgentEnv>,
+) -> Result<String, SshSetupError> {
+    let mut cmd = Command::new("ssh-add");
+    cmd.arg(private_key)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(a) = agent {
+        cmd.env("SSH_AUTH_SOCK", &a.ssh_auth_sock);
+        cmd.env("SSH_AGENT_PID", a.ssh_agent_pid.to_string());
+    }
+    let output = cmd
         .output()
         .await
         .with_context(|| format!("spawning ssh-add {}", private_key.display()))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
-        return Ok(if stdout.is_empty() {
-            "Key added to ssh-agent.".into()
-        } else {
-            stdout
-        });
+        if !stdout.is_empty() {
+            return Ok(stdout);
+        }
+        if !stderr.is_empty() {
+            return Ok(stderr);
+        }
+        return Ok("Key added to ssh-agent.".into());
     }
     let detail = if stderr.is_empty() { stdout } else { stderr };
     Err(SshSetupError::Other(anyhow::anyhow!(
-        "ssh-add failed: {detail}"
+        "{}",
+        format_ssh_add_agent_access_error("ssh-add failed", &detail)
     )))
+}
+
+/// What: Load a key into `ssh-agent`, spawning one if nothing answers `ssh-add`.
+///
+/// Inputs:
+/// - `session`: optional app-started agent from a prior check or add.
+///
+/// Output:
+/// - `(message, Some(env))` when a new agent was started for this call.
+///
+/// Details:
+/// - Same unreachable-agent detection as [`list_ssh_agent_keys_or_start_session`].
+pub async fn ssh_add_private_key_or_start_session(
+    private_key: &Path,
+    session: Option<&SshAgentEnv>,
+) -> Result<(String, Option<SshAgentEnv>), SshSetupError> {
+    match ssh_add_private_key_env(private_key, session).await {
+        Ok(msg) => Ok((msg, None)),
+        Err(e) if is_unreachable_ssh_agent_error(&e) => {
+            let env = spawn_ssh_agent_session().await?;
+            let msg = ssh_add_private_key_env(private_key, Some(&env)).await?;
+            Ok((msg, Some(env)))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Ensure `~/.ssh/aur` exists. Reuses an existing file when present,
@@ -909,5 +1098,37 @@ Host github.com
         assert!(aur_account_edit_url("   ").is_err());
         assert!(aur_account_edit_url("evil/name").is_err());
         assert!(aur_account_edit_url("x y").is_err());
+    }
+
+    #[test]
+    fn parse_ssh_agent_sh_output_sample() {
+        let sample = "SSH_AUTH_SOCK=/home/u/.ssh/agent/s.abc; export SSH_AUTH_SOCK;\n\
+            SSH_AGENT_PID=1147085; export SSH_AGENT_PID;\n\
+            echo Agent pid 1147085;\n";
+        let env = super::parse_ssh_agent_sh_output(sample).expect("parse");
+        assert_eq!(env.ssh_agent_pid, 1_147_085);
+        assert_eq!(
+            env.ssh_auth_sock,
+            std::path::PathBuf::from("/home/u/.ssh/agent/s.abc")
+        );
+    }
+
+    #[test]
+    fn format_ssh_add_agent_access_error_adds_sock_hint() {
+        let msg = super::format_ssh_add_agent_access_error(
+            "ssh-add -l failed",
+            "Could not open a connection to your authentication agent.",
+        );
+        assert!(msg.contains("ssh-add -l failed"));
+        assert!(msg.contains("SSH_AUTH_SOCK"));
+    }
+
+    #[test]
+    fn format_ssh_add_agent_access_error_pass_through_unrelated() {
+        let msg = super::format_ssh_add_agent_access_error(
+            "ssh-add failed",
+            "Permission denied (publickey).",
+        );
+        assert_eq!(msg, "ssh-add failed: Permission denied (publickey).");
     }
 }
