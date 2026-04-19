@@ -54,6 +54,8 @@ struct MainShellInner {
     tab_pages: RefCell<Vec<adw::TabPage>>,
     home_tab_page: RefCell<Option<adw::TabPage>>,
     home_list: RefCell<Option<glib::WeakRef<ListBox>>>,
+    /// Search / sort / filter state for the Home tab package list ([`crate::ui::home`]).
+    home_list_controls: RefCell<Option<Rc<RefCell<crate::ui::home::HomePackageListState>>>>,
     /// Weak ref to Connection tab “AUR username” row — kept in sync when username is saved elsewhere.
     connection_aur_username_row: RefCell<Option<glib::WeakRef<EntryRow>>>,
     /// Last package id used to build Sync–Publish tab bodies; `None` = placeholders.
@@ -107,6 +109,7 @@ impl MainShell {
             tab_pages: RefCell::new(Vec::new()),
             home_tab_page: RefCell::new(None),
             home_list: RefCell::new(None),
+            home_list_controls: RefCell::new(None),
             connection_aur_username_row: RefCell::new(None),
             tabs_package_id: RefCell::new(None),
             pkgver_tab_cache: RefCell::new(String::new()),
@@ -352,6 +355,14 @@ impl MainShell {
         *self.inner.home_list.borrow_mut() = Some(list.downgrade());
     }
 
+    /// Registers Home tab list controls so [`Self::refresh_home_list`] can re-apply search, sort, and filter.
+    pub fn set_home_list_controls(
+        &self,
+        state: Rc<RefCell<crate::ui::home::HomePackageListState>>,
+    ) {
+        *self.inner.home_list_controls.borrow_mut() = Some(state);
+    }
+
     fn start_periodic_connection_checks(&self, state: &AppStateRef) {
         let shell = self.clone();
         let state_c = state.clone();
@@ -474,7 +485,10 @@ impl MainShell {
         else {
             return;
         };
-        crate::ui::home::refresh_package_list(&list, self, state);
+        let Some(controls) = self.inner.home_list_controls.borrow().clone() else {
+            return;
+        };
+        crate::ui::home::refresh_package_list(&list, self, state, &controls);
     }
 
     /// Rebuild Sync–Publish if `state.package` id changed (public for add-package flow).

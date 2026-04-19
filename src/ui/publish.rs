@@ -11,8 +11,8 @@ use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::log_view::LogView;
 use crate::ui::shell::MainShell;
+use crate::workflow::admin;
 use crate::workflow::aur_git;
-use crate::workflow::build as build_wf;
 use crate::workflow::sync;
 
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
@@ -41,7 +41,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
              pkgbase, Git may warn that you cloned an empty repository—that is expected \
              until the server accepts your first push (see the Arch wiki AUR submission \
              guidelines).\n\n\
-             Prepare stages PKGBUILD and .SRCINFO from your Sync directory into that \
+             Prepare runs the same validation + .SRCINFO regeneration as Register, clones (or \
+             reuses) the AUR repo, stages PKGBUILD and .SRCINFO from your Sync directory into that \
              clone, shows the diff, then you can commit and push.",
             pkg.aur_ssh_url()
         ))
@@ -177,11 +178,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     let stage_btn = Button::builder()
-        .label("Prepare (clone + .SRCINFO + diff)")
+        .label("Prepare (validate + clone + .SRCINFO + diff)")
         .sensitive(ssh_ready)
         .tooltip_text(if ssh_ready {
-            "Clones the AUR repo if needed (an empty-repo warning on first clone is \
-             normal for a new pkgbase), regenerates .SRCINFO, and shows the diff."
+            "Runs required validation checks and regenerates .SRCINFO, clones the AUR repo if \
+             needed (an empty-repo warning on first clone is normal for a new pkgbase), then \
+             stages files and shows the diff."
         } else {
             "Set up and verify SSH first."
         })
@@ -275,10 +277,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let ssh_url = ssh_url.clone();
             runtime::spawn_streaming(
                 move |tx| async move {
-                    let clone_dir = aur_git::ensure_clone(&work, &id, &ssh_url, &tx)
+                    admin::prepare_pkgdir_for_aur_push(&build_dir, Some(ssh_url.as_str()), &tx)
                         .await
                         .map_err(|e| e.to_string())?;
-                    build_wf::write_srcinfo(&build_dir, &tx)
+                    let clone_dir = aur_git::ensure_clone(&work, &id, &ssh_url, &tx)
                         .await
                         .map_err(|e| e.to_string())?;
                     aur_git::stage_files(&build_dir, &clone_dir)

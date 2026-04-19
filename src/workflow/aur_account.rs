@@ -208,6 +208,7 @@ pub fn to_package_def(summary: &AurPackageSummary) -> PackageDef {
         destination_dir: None,
         sync_subdir: None,
         pkgbuild_refreshed_at_unix: None,
+        favorite: false,
     }
 }
 

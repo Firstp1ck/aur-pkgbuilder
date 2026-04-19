@@ -3,15 +3,19 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
 use std::time::Duration;
+
+use crate::workflow::package::PackageDef;
 
 use adw::prelude::*;
 use adw::{ActionRow, Banner, EntryRow, ExpanderRow, Toast, ToastOverlay};
+use glib::ControlFlow;
 use glib::source::{SourceId, timeout_add_local_once};
 use gtk4::ListBox;
 use gtk4::{
     Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer,
-    TextTag, TextView, WrapMode,
+    TextTag, TextView, Window, WrapMode,
 };
 
 use crate::runtime;
@@ -20,7 +24,6 @@ use crate::ui;
 use crate::ui::pkgbuild_stale;
 use crate::ui::shell::MainShell;
 use crate::workflow::build as build_wf;
-use crate::workflow::package::PackageDef;
 use crate::workflow::pkgbuild_diff::diff_pkgbuild_lines;
 use crate::workflow::pkgbuild_edit::{self, PkgbuildQuickFields};
 use crate::workflow::sync;
@@ -28,6 +31,41 @@ use crate::workflow::sync;
 const DIFF_TAG_INSERT: &str = "pkg-diff-insert";
 const DIFF_TAG_REMOVED_PREVIEW: &str = "pkg-diff-removed-preview";
 const REMOVED_PREVIEW_MAX_LINES: usize = 120;
+
+/// What: Selects which [`PackageDef`] backs PKGBUILD path resolution in [`build_section`].
+///
+/// Details:
+/// - [`Self::SelectedPackage`]: Version tab — reload/save use [`AppStateRef::package`].
+/// - [`Self::RegisterWizard`]: Register flow — fixed cell; optional hook after a successful Save.
+#[derive(Clone)]
+pub enum PkgbuildEditorPkgSource {
+    /// Home-selected package (Version tab).
+    SelectedPackage,
+    /// Register wizard row; `on_saved_invalidate` runs after a successful Save (e.g. clear prepare).
+    RegisterWizard {
+        pkg: Rc<RefCell<PackageDef>>,
+        on_saved_invalidate: Option<Rc<dyn Fn()>>,
+        /// When true, the **Quick metadata** expander starts expanded (e.g. right after creating a starter PKGBUILD).
+        expand_quick_metadata: bool,
+    },
+}
+
+fn resolve_editor_pkg(source: &PkgbuildEditorPkgSource, state: &AppStateRef) -> Option<PackageDef> {
+    match source {
+        PkgbuildEditorPkgSource::SelectedPackage => state.borrow().package.clone(),
+        PkgbuildEditorPkgSource::RegisterWizard { pkg, .. } => Some(pkg.borrow().clone()),
+    }
+}
+
+fn invoke_register_save_hook(source: &PkgbuildEditorPkgSource) {
+    if let PkgbuildEditorPkgSource::RegisterWizard {
+        on_saved_invalidate: Some(cb),
+        ..
+    } = source
+    {
+        cb();
+    }
+}
 
 /// Shared quick-field rows and the PKGBUILD text buffer.
 struct EditorState {
@@ -283,6 +321,40 @@ fn entry(title: &str) -> EntryRow {
     EntryRow::builder().title(title).build()
 }
 
+/// What: Keeps a standalone editor [`Window`] height in sync when **Quick metadata** expands or collapses.
+///
+/// Details:
+/// - Uses the expander’s vertical natural size before/after each toggle and applies the delta to the
+///   window height (idle callback so layout has settled). The first notification only records a baseline.
+/// - Intended for the Register wizard modal; embedded editors pass `None` for [`build_section`]'s window.
+fn connect_quick_metadata_window_height_sync(win: &Window, expander: &ExpanderRow) {
+    let win = win.clone();
+    let expander = expander.clone();
+    let last_nat = Rc::new(Cell::new(None::<i32>));
+    expander.clone().connect_expanded_notify(move |_| {
+        let win = win.clone();
+        let expander = expander.clone();
+        let last_nat = last_nat.clone();
+        glib::idle_add_local(move || {
+            let width = win.width().max(win.default_width()).max(400);
+            let (_, _, _, exp_nat) = expander.measure(Orientation::Vertical, width);
+            match last_nat.get() {
+                None => {
+                    last_nat.set(Some(exp_nat));
+                }
+                Some(prev_nat) => {
+                    let dh = exp_nat - prev_nat;
+                    let new_h = (win.height() + dh).clamp(360, 2400);
+                    win.set_default_size(width, new_h);
+                    win.set_size_request(-1, new_h);
+                    last_nat.set(Some(exp_nat));
+                }
+            }
+            ControlFlow::Break
+        });
+    });
+}
+
 fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
     exp.add_row(&st.maintainer);
     exp.add_row(&st.pkgname);
@@ -299,31 +371,49 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
     exp.add_row(&st.source);
 }
 
-/// What: Builds the PKGBUILD editor block for the Version step.
+/// What: Builds the PKGBUILD editor block for the Version step or the Register wizard.
 ///
 /// Inputs:
-/// - `state`, `pkg`: resolve the on-disk package directory.
+/// - `pkg_source`: which [`PackageDef`] supplies paths and reload/save targets.
 /// - `toasts`: success / failure feedback.
+/// - `resize_height_toplevel`: when set (Register modal), **Quick metadata** expand/collapse nudges the
+///   window height by the measured row delta.
 ///
 /// Output:
 /// - A boxed [`ListBox`] whose expander wraps the editor block for the Version page.
 ///
 /// Details:
-/// - `stale_banner` lives on the Version page; Reload updates it after
-///   [`crate::workflow::package::record_pkgbuild_refresh`].
+/// - `stale_banner` is updated after Reload; [`PkgbuildEditorPkgSource::SelectedPackage`] uses
+///   [`crate::workflow::package::record_pkgbuild_refresh`], Register uses
+///   [`crate::workflow::package::record_pkgbuild_refresh_by_id`].
 pub fn build_section(
     shell: &MainShell,
     state: &AppStateRef,
-    pkg: &PackageDef,
+    pkg_source: &PkgbuildEditorPkgSource,
     toasts: &ToastOverlay,
     stale_banner: &Banner,
+    resize_height_toplevel: Option<&Window>,
 ) -> ListBox {
+    let Some(pkg) = resolve_editor_pkg(pkg_source, state) else {
+        return ui::collapsible_preferences_section(
+            "Edit PKGBUILD",
+            Some("Select a package on Home to use this editor."),
+            ui::DEFAULT_SECTION_EXPANDED,
+            |exp| {
+                let row = Banner::builder()
+                    .title("No package is selected on Home.")
+                    .revealed(true)
+                    .build();
+                exp.add_row(&row);
+            },
+        );
+    };
     let work = state.borrow().config.work_dir.clone();
-    let dir = sync::package_dir(work.as_deref(), pkg);
+    let dir = sync::package_dir(work.as_deref(), &pkg);
     let path_display = dir
         .as_ref()
         .map(|d| d.join("PKGBUILD").display().to_string())
-        .unwrap_or_else(|| sync::destination_help_line(work.as_deref(), pkg));
+        .unwrap_or_else(|| sync::destination_help_line(work.as_deref(), &pkg));
 
     let banner = Banner::builder()
         .title(
@@ -403,7 +493,7 @@ pub fn build_section(
     diff_removed_bar.append(&removed_caption);
     diff_removed_bar.append(&removed_scroll);
 
-    let st = EditorState::new(pkg, diff_removed_bar.clone(), diff_removed_buf);
+    let st = EditorState::new(&pkg, diff_removed_bar.clone(), diff_removed_buf);
     st.bind_diff_refresh();
 
     let expander = ExpanderRow::builder()
@@ -413,6 +503,18 @@ pub fn build_section(
         )
         .build();
     add_quick_rows(&expander, &st);
+    if matches!(
+        pkg_source,
+        PkgbuildEditorPkgSource::RegisterWizard {
+            expand_quick_metadata: true,
+            ..
+        }
+    ) {
+        expander.set_expanded(true);
+    }
+    if let Some(win) = resize_height_toplevel {
+        connect_quick_metadata_window_height_sync(win, &expander);
+    }
 
     let full_label = Label::builder()
         .label("Full PKGBUILD (prepare, build, check, package, …)")
@@ -444,9 +546,13 @@ pub fn build_section(
     let shell_reload = shell.clone();
     let st_reload = st.clone();
     let stale_reload = stale_banner.clone();
+    let pkg_source_reload = pkg_source.clone();
     reload.connect_clicked(move |_| {
         let stale_for_cb = stale_reload.clone();
-        let pkg = state_r.borrow().package().clone();
+        let Some(pkg) = resolve_editor_pkg(&pkg_source_reload, &state_r) else {
+            toasts_r.add_toast(Toast::new("No package is available for this editor."));
+            return;
+        };
         let work = state_r.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
             toasts_r.add_toast(Toast::new(
@@ -458,17 +564,36 @@ pub fn build_section(
         let toasts = toasts_r.clone();
         let state_cb = state_r.clone();
         let shell_cb = shell_reload.clone();
+        let pkg_source_cb = pkg_source_reload.clone();
         runtime::spawn(
             async move { pkgbuild_edit::read_pkgbuild(&dir).await },
             move |res| match res {
                 Ok(s) => {
                     st.replace_buffer_and_baseline(&s);
                     st.populate_quick(&pkgbuild_edit::parse_quick_fields(&s));
-                    crate::workflow::package::record_pkgbuild_refresh(&state_cb);
-                    pkgbuild_stale::banner_set_pkgbuild_stale(
-                        &stale_for_cb,
-                        state_cb.borrow().package(),
-                    );
+                    match &pkg_source_cb {
+                        PkgbuildEditorPkgSource::SelectedPackage => {
+                            crate::workflow::package::record_pkgbuild_refresh(&state_cb);
+                            if let Some(p) = state_cb.borrow().package.as_ref() {
+                                pkgbuild_stale::banner_set_pkgbuild_stale(&stale_for_cb, p);
+                            }
+                        }
+                        PkgbuildEditorPkgSource::RegisterWizard { pkg: cell, .. } => {
+                            crate::workflow::package::record_pkgbuild_refresh_by_id(
+                                &state_cb, &pkg.id,
+                            );
+                            if let Some(p) = state_cb
+                                .borrow()
+                                .registry
+                                .packages
+                                .iter()
+                                .find(|x| x.id == pkg.id)
+                            {
+                                *cell.borrow_mut() = p.clone();
+                                pkgbuild_stale::banner_set_pkgbuild_stale(&stale_for_cb, p);
+                            }
+                        }
+                    }
                     shell_cb.notify_pkgbuild_reloaded_from_disk(&state_cb);
                     toasts.add_toast(Toast::new("PKGBUILD loaded"));
                 }
@@ -481,8 +606,12 @@ pub fn build_section(
     let state_s = state.clone();
     let shell_save = shell.clone();
     let st_save = st.clone();
+    let pkg_source_save = pkg_source.clone();
     save.connect_clicked(move |_| {
-        let pkg = state_s.borrow().package().clone();
+        let Some(pkg) = resolve_editor_pkg(&pkg_source_save, &state_s) else {
+            toasts_s.add_toast(Toast::new("No package is available for this editor."));
+            return;
+        };
         let work = state_s.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
             toasts_s.add_toast(Toast::new(
@@ -495,12 +624,14 @@ pub fn build_section(
         let toasts = toasts_s.clone();
         let state_cb = state_s.clone();
         let shell_cb = shell_save.clone();
+        let pkg_source_done = pkg_source_save.clone();
         runtime::spawn(
             async move { pkgbuild_edit::write_pkgbuild(&dir, &text).await },
             move |res| match res {
                 Ok(()) => {
                     st.baseline.replace(st.full_text());
                     st.run_line_diff_highlights();
+                    invoke_register_save_hook(&pkg_source_done);
                     shell_cb.notify_pkgbuild_saved(&state_cb);
                     toasts.add_toast(Toast::new("PKGBUILD saved"));
                 }
@@ -522,8 +653,12 @@ pub fn build_section(
 
     let toasts_i = toasts.clone();
     let state_i = state.clone();
+    let pkg_source_srcinfo = pkg_source.clone();
     srcinfo.connect_clicked(move |_| {
-        let pkg = state_i.borrow().package().clone();
+        let Some(pkg) = resolve_editor_pkg(&pkg_source_srcinfo, &state_i) else {
+            toasts_i.add_toast(Toast::new("No package is available for this editor."));
+            return;
+        };
         let work = state_i.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
             toasts_i.add_toast(Toast::new(
@@ -546,6 +681,7 @@ pub fn build_section(
         let toasts_i = toasts.clone();
         let state_i = state.clone();
         let shell_i = shell.clone();
+        let pkg_source_init = pkg_source.clone();
         runtime::spawn(
             async move { pkgbuild_edit::read_pkgbuild(&dir_i).await },
             move |res| match res {
@@ -555,9 +691,15 @@ pub fn build_section(
                     shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
                 }
                 Err(_) => {
-                    st_i.replace_buffer_and_baseline(
-                        "# No PKGBUILD on disk yet — use the Sync tab to download one, or paste here and Save.\n",
-                    );
+                    let hint = match pkg_source_init {
+                        PkgbuildEditorPkgSource::SelectedPackage => {
+                            "# No PKGBUILD on disk yet — use the Sync tab to download one, or paste here and Save.\n"
+                        }
+                        PkgbuildEditorPkgSource::RegisterWizard { .. } => {
+                            "# No PKGBUILD on disk yet — use “Create starter PKGBUILD” on the Register page, or paste here and Save.\n"
+                        }
+                    };
+                    st_i.replace_buffer_and_baseline(hint);
                     shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
                     toasts_i.add_toast(Toast::new("No PKGBUILD on disk yet"));
                 }

@@ -9,20 +9,52 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, Window};
+use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, SwitchRow, Window};
 use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Label, Orientation, StringList};
 
 use crate::runtime;
 use crate::ui;
 use crate::ui::folder_pick;
-use crate::workflow::package::{PackageDef, PackageKind};
+use crate::workflow::package::{self, PackageDef, PackageKind};
 use crate::workflow::pkgbase::{self, PkgbasePublishNs};
 use crate::workflow::sync as sync_wf;
 
 type SaveCallback = Rc<RefCell<Option<Box<dyn FnOnce(PackageDef)>>>>;
 
+/// What: Distinguishes **Add/Edit package** from **Register new AUR package** in [`open`].
+///
+/// Details:
+/// - [`AddOrEdit`]: full form including required PKGBUILD URL; AUR name collision allows Continue
+///   for adoption flows.
+/// - [`RegisterNewAurPackage`]: greenfield copy, no PKGBUILD URL row, empty URL on save; AUR
+///   collision is blocking (aligns with [`crate::workflow::admin::register_prepare_on_aur`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PackageEditorPurpose {
+    /// Home **Add package** or **Edit package** (full fields; Sync uses PKGBUILD URL).
+    #[default]
+    AddOrEdit,
+    /// **Register new AUR package** wizard — local PKGBUILD first; add a Sync URL later via Edit.
+    RegisterNewAurPackage,
+}
+
 const PKGBASE_FIELD_HINT: &str =
     "Use the pkgbase (AUR repository name), not a split pkgname. Example: my-pkg-bin.";
+
+fn refresh_kind_naming_label(label: &Label, id: &str, kind_row: &ComboRow) {
+    let kind = PackageKind::all()
+        .get(kind_row.selected() as usize)
+        .copied()
+        .unwrap_or(PackageKind::Bin);
+    if let Some(tip) = package::pkgbase_kind_suffix_hint(id, kind) {
+        label.set_label(tip);
+        label.set_visible(true);
+        label.set_css_classes(&["dim-label", "warning"]);
+    } else {
+        label.set_label("");
+        label.set_visible(false);
+        label.set_css_classes(&["dim-label"]);
+    }
+}
 
 fn set_pkgbase_feedback(label: &Label, text: &str, as_error: bool) {
     label.set_label(text);
@@ -40,6 +72,7 @@ fn apply_pkgbase_namespace_result(
     once: &SaveCallback,
     pkg: PackageDef,
     ns: PkgbasePublishNs,
+    purpose: PackageEditorPurpose,
 ) {
     if ns.official_repo_hit {
         set_pkgbase_feedback(
@@ -59,6 +92,23 @@ fn apply_pkgbase_namespace_result(
         return;
     }
     if ns.aur_pkgbase_hit {
+        if purpose == PackageEditorPurpose::RegisterNewAurPackage {
+            set_pkgbase_feedback(
+                id_feedback,
+                "This pkgbase already exists on the AUR. Greenfield Register needs a new name—use Publish to update an existing repo.",
+                true,
+            );
+            let body = "Registration creates a new AUR Git repository for a pkgbase that does not exist yet. This name is already taken. Pick another pkgbase, or cancel and use Publish / Edit package for an existing one.";
+            let d = AlertDialog::new(Some("Name already on the AUR"), Some(body));
+            d.add_responses(&[("ok", "_OK")]);
+            let window = window.clone();
+            d.choose(
+                Some(&window),
+                Option::<&gtk4::gio::Cancellable>::None,
+                |_| {},
+            );
+            return;
+        }
         set_pkgbase_feedback(
             id_feedback,
             "This pkgbase already exists on the AUR. Continue only if you maintain or adopt it.",
@@ -93,6 +143,18 @@ fn apply_pkgbase_namespace_result(
     window.close();
 }
 
+/// What: Builds a preferences row title following the “required = trailing *” convention.
+///
+/// Details:
+/// - Optional rows omit ` *`; see row subtitles for “app-only” / default hints.
+fn field_title(base: &'static str, required: bool) -> String {
+    if required {
+        format!("{base} *")
+    } else {
+        base.to_string()
+    }
+}
+
 fn preview_pkg(
     id: &str,
     destination_dir: Option<String>,
@@ -115,6 +177,7 @@ fn preview_pkg(
             destination_dir,
             sync_subdir,
             pkgbuild_refreshed_at_unix: p.pkgbuild_refreshed_at_unix,
+            favorite: p.favorite,
         },
         None => PackageDef {
             id: id.to_string(),
@@ -126,6 +189,7 @@ fn preview_pkg(
             destination_dir,
             sync_subdir,
             pkgbuild_refreshed_at_unix: None,
+            favorite: false,
         },
     }
 }
@@ -139,12 +203,12 @@ fn set_dest_subtitle(
     legacy_cleared: bool,
 ) {
     let pkg = preview_pkg(id, destination_dir, existing, legacy_cleared);
-    let sub = if let Some(dir) = sync_wf::package_dir(work_dir, &pkg) {
+    let detail = if let Some(dir) = sync_wf::package_dir(work_dir, &pkg) {
         dir.join("PKGBUILD").display().to_string()
     } else {
         sync_wf::destination_help_line(work_dir, &pkg)
     };
-    row.set_subtitle(&sub);
+    row.set_subtitle(&format!("Optional — {detail}"));
 }
 
 /// Open a modal editor. If `existing` is `Some`, the dialog edits that
@@ -153,14 +217,23 @@ fn set_dest_subtitle(
 ///
 /// `work_dir` is used only to preview the default PKGBUILD path in the
 /// destination row; it may be `None`.
+///
+/// Inputs:
+/// - `purpose`: [`PackageEditorPurpose::RegisterNewAurPackage`] for the Register wizard (tailored
+///   copy, no PKGBUILD URL row for new rows); [`PackageEditorPurpose::AddOrEdit`] for Home add/edit.
 pub fn open(
     parent: Option<&gtk4::Window>,
     work_dir: Option<PathBuf>,
     existing: Option<PackageDef>,
+    purpose: PackageEditorPurpose,
     on_save: impl FnOnce(PackageDef) + 'static,
 ) {
     const MIN_W: i32 = 440;
     const MIN_H: i32 = 400;
+
+    let register = purpose == PackageEditorPurpose::RegisterNewAurPackage;
+    let is_new = existing.is_none();
+    let pkgbuild_url_required = purpose == PackageEditorPurpose::AddOrEdit;
 
     let window = Window::builder()
         .modal(true)
@@ -170,6 +243,8 @@ pub fn open(
         .height_request(MIN_H)
         .title(if existing.is_some() {
             "Edit package"
+        } else if purpose == PackageEditorPurpose::RegisterNewAurPackage {
+            "Define package for AUR"
         } else {
             "Add package"
         })
@@ -207,11 +282,25 @@ pub fn open(
     }
 
     let id_row = EntryRow::builder()
-        .title("AUR pkgbase (repository name)")
+        .title(field_title("AUR pkgbase (repository name)", is_new))
         .build();
-    let title_row = EntryRow::builder().title("Display title").build();
-    let subtitle_row = EntryRow::builder().title("Short description").build();
-    let url_row = EntryRow::builder().title("PKGBUILD URL (raw)").build();
+    let title_row = EntryRow::builder()
+        .title("Display title — app-only (not PKGBUILD or AUR); if empty, the pkgbase is used")
+        .build();
+    let subtitle_row = EntryRow::builder()
+        .title("Short description — app-only; optional second line on Home")
+        .build();
+    let favorite_row = SwitchRow::builder()
+        .title("Favorite on Home")
+        .subtitle("List this package under Favorites at the top of the Home tab (right-click also works).")
+        .active(existing.as_ref().is_some_and(|p| p.favorite))
+        .build();
+    let url_row = EntryRow::builder()
+        .title(field_title("PKGBUILD URL (raw)", pkgbuild_url_required))
+        .build();
+    url_row.set_tooltip_text(Some(
+        "Raw PKGBUILD file URL for the Sync tab. Optional for brand-new Register—add later via Edit package.",
+    ));
 
     let destination_dir_state: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
         existing.as_ref().and_then(|p| p.destination_dir.clone()),
@@ -241,7 +330,7 @@ pub fn open(
     dest_row.add_suffix(&dest_btns);
 
     let icon_row = EntryRow::builder()
-        .title("Icon name (optional, freedesktop)")
+        .title("Icon name — app-only; optional freedesktop icon (if empty, Kind picks it)")
         .build();
 
     let kind_model = StringList::new(&[]);
@@ -250,9 +339,17 @@ pub fn open(
     }
     let kind_row = ComboRow::builder()
         .title("Kind")
-        .subtitle("Only tunes UI hints; the makepkg flow is the same.")
+        .subtitle("App-only; default list icon when Icon name is empty. Does not change makepkg.")
         .model(&kind_model)
         .build();
+
+    let kind_naming_feedback = Label::builder()
+        .wrap(true)
+        .halign(Align::Start)
+        .xalign(0.0)
+        .css_classes(["dim-label"])
+        .build();
+    kind_naming_feedback.set_visible(false);
 
     if let Some(pkg) = existing.as_ref() {
         id_row.set_text(&pkg.id);
@@ -278,39 +375,63 @@ pub fn open(
         *legacy_cleared.borrow(),
     );
 
-    let pkg_section = if existing.is_some() {
-        ui::collapsible_preferences_section("Package", None, ui::DEFAULT_SECTION_EXPANDED, |exp| {
-            exp.add_row(&id_feedback);
-            exp.add_row(&id_row);
-            exp.add_row(&title_row);
-            exp.add_row(&subtitle_row);
-            exp.add_row(&url_row);
-            exp.add_row(&dest_row);
-            exp.add_row(&kind_row);
-            exp.add_row(&icon_row);
-        })
+    const REQUIRED_STAR_NOTE: &str = "Required fields are marked with *. ";
+    let new_package_blurb = if register {
+        format!(
+            "{REQUIRED_STAR_NOTE}Set the pkgbase and where your PKGBUILD lives on disk. After saving, return to the \
+             Register wizard to validate and push— that creates the AUR Git repository. You can add \
+             an upstream PKGBUILD URL later with Edit package if you use Sync."
+        )
     } else {
+        format!(
+            "{REQUIRED_STAR_NOTE}When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
+             and push; there is no separate approval queue. A first-time Git warning about an \
+             empty repository is normal until the first accepted push."
+        )
+    };
+    let edit_package_note = "Required fields are marked with *. Display title, short description, and icon name are app-only (not PKGBUILD or AUR); leave display title empty to use the pkgbase.";
+    let pkg_section = if existing.is_some() {
         ui::collapsible_preferences_section(
             "Package",
-            Some(
-                "When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
-                 and push; there is no separate approval queue. A first-time Git warning about an \
-                 empty repository is normal until the first accepted push.",
-            ),
+            Some(edit_package_note),
             ui::DEFAULT_SECTION_EXPANDED,
             |exp| {
                 exp.add_row(&id_feedback);
                 exp.add_row(&id_row);
                 exp.add_row(&title_row);
                 exp.add_row(&subtitle_row);
+                exp.add_row(&favorite_row);
                 exp.add_row(&url_row);
                 exp.add_row(&dest_row);
                 exp.add_row(&kind_row);
+                exp.add_row(&kind_naming_feedback);
+                exp.add_row(&icon_row);
+            },
+        )
+    } else {
+        ui::collapsible_preferences_section(
+            "Package",
+            Some(new_package_blurb.as_str()),
+            ui::DEFAULT_SECTION_EXPANDED,
+            |exp| {
+                exp.add_row(&id_feedback);
+                exp.add_row(&id_row);
+                exp.add_row(&title_row);
+                exp.add_row(&subtitle_row);
+                exp.add_row(&favorite_row);
+                if !register {
+                    exp.add_row(&url_row);
+                }
+                exp.add_row(&dest_row);
+                exp.add_row(&kind_row);
+                exp.add_row(&kind_naming_feedback);
                 exp.add_row(&icon_row);
             },
         )
     };
     body.append(&pkg_section);
+
+    refresh_kind_naming_label(&kind_naming_feedback, &id_row.text(), &kind_row);
 
     let root = GtkBox::builder().orientation(Orientation::Vertical).build();
     root.append(&header);
@@ -325,10 +446,13 @@ pub fn open(
         let destination_dir_state = destination_dir_state.clone();
         let legacy_cleared = legacy_cleared.clone();
         let id_feedback_c = id_feedback.clone();
+        let kind_naming_c = kind_naming_feedback.clone();
+        let kind_row_c = kind_row.clone();
         id_row.connect_changed(move |_entry| {
             if existing_for.is_none() {
                 set_pkgbase_feedback(&id_feedback_c, PKGBASE_FIELD_HINT, false);
             }
+            refresh_kind_naming_label(&kind_naming_c, &id_row_c.text(), &kind_row_c);
             set_dest_subtitle(
                 &dest_row,
                 work_for_preview.as_deref(),
@@ -337,6 +461,15 @@ pub fn open(
                 destination_dir_state.borrow().clone(),
                 *legacy_cleared.borrow(),
             );
+        });
+    }
+
+    {
+        let kind_naming_c = kind_naming_feedback.clone();
+        let id_row_k = id_row.clone();
+        let kind_row_k = kind_row.clone();
+        kind_row_k.clone().connect_selected_notify(move |_row| {
+            refresh_kind_naming_label(&kind_naming_c, &id_row_k.text(), &kind_row_k);
         });
     }
 
@@ -429,17 +562,20 @@ pub fn open(
         let url_row = url_row.clone();
         let icon_row = icon_row.clone();
         let kind_row = kind_row.clone();
+        let favorite_row = favorite_row.clone();
         let destination_dir_state = destination_dir_state.clone();
         let legacy_cleared = legacy_cleared.clone();
         let existing_rc = existing_rc.clone();
         let save_primary = save.clone();
         let save_busy = save.clone();
         let once: SaveCallback = Rc::new(RefCell::new(Some(Box::new(on_save))));
+        let purpose_save = purpose;
         save_primary.connect_clicked(move |btn| {
             btn.remove_css_class("error");
             let id = id_row.text().trim().to_string();
             let url = url_row.text().trim().to_string();
-            if id.is_empty() || url.is_empty() {
+            let url_required = purpose_save == PackageEditorPurpose::AddOrEdit;
+            if id.is_empty() || (url_required && url.is_empty()) {
                 btn.add_css_class("error");
                 return;
             }
@@ -482,11 +618,16 @@ pub fn open(
                 title,
                 subtitle,
                 kind,
-                pkgbuild_url: url,
+                pkgbuild_url: if purpose_save == PackageEditorPurpose::RegisterNewAurPackage {
+                    String::new()
+                } else {
+                    url
+                },
                 icon_name,
                 destination_dir,
                 sync_subdir,
                 pkgbuild_refreshed_at_unix: preserved_refresh,
+                favorite: favorite_row.is_active(),
             };
 
             if existing_rc.is_some() {
@@ -509,6 +650,7 @@ pub fn open(
             let save_c = save_busy.clone();
             let once_c = once.clone();
             let pkg_ready = pkg;
+            let purpose_probe = purpose_save;
             runtime::spawn(
                 async move { pkgbase::check_pkgbase_publish_namespace(&id_for_probe).await },
                 move |res| {
@@ -529,6 +671,7 @@ pub fn open(
                             &once_c,
                             pkg_ready,
                             ns,
+                            purpose_probe,
                         ),
                     }
                 },

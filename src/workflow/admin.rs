@@ -2,9 +2,8 @@
 //!
 //! These are the cross-cutting "lifecycle" actions — registering a brand-new
 //! AUR repo, importing an existing one, checking upstream for updates, and
-//! archiving a package. Most helpers beyond **register** are still placeholders
-//! that return [`AdminError::NotImplemented`]; each function documents the
-//! intended expansion so the UI already has stable call sites.
+//! archiving a package. **Import** and **archive** remain placeholders that return
+//! [`AdminError::NotImplemented`]; [`check_upstream`] is implemented.
 //!
 //! Register follows a **clone-first** model aligned with the Arch wiki: clone
 //! `ssh://aur@aur.archlinux.org/<pkgbase>.git` into `<work_dir>/aur/<pkgbase>`
@@ -23,11 +22,13 @@ use super::aur_git;
 use super::build::{self as build_wf, LogLine};
 use super::package::PackageDef;
 use super::pkgbase::{self, PkgbaseNsError};
+use super::pkgbuild_diff;
+use super::pkgbuild_edit;
 use super::privilege;
 use super::sync;
 use super::validate;
 
-/// How [`register_on_aur`] should behave when `origin/master` already has commits
+/// How [`register_prepare_on_aur`] should behave when `origin/master` already has commits
 /// (for example a previously deleted AUR package whose Git history was kept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RegisterRemoteHistoryMode {
@@ -72,38 +73,57 @@ pub enum AdminError {
     Other(#[from] anyhow::Error),
 }
 
-/// High-level status returned by [`check_upstream`]. Variants are not yet
-/// constructed because the function is a placeholder; they exist now so the
-/// UI has a stable match to render against.
-#[allow(dead_code)]
+/// High-level status returned by [`check_upstream`].
 #[derive(Debug, Clone)]
 pub enum UpdateStatus {
-    /// Upstream `pkgver` matches the locally synced PKGBUILD.
+    /// Local `PKGBUILD` bytes match the upstream URL (after newline normalization).
     UpToDate { version: String },
-    /// Upstream moved ahead of our local snapshot.
-    Outdated { local: String, upstream: String },
-    /// Either side could not be parsed; caller should fall back to a manual diff.
-    Unknown,
+    /// Upstream text differs — [`Self::Outdated::diff`] is a unified line diff.
+    Outdated {
+        /// Local `pkgver=` value when parseable, else `"?"`.
+        local: String,
+        /// Upstream `pkgver=` value when parseable, else `"?"`.
+        upstream: String,
+        /// Unified diff (local → upstream), suitable for a monospace viewer.
+        diff: String,
+    },
 }
 
-/// What: First-time publication of a **new** pkgbase to the AUR via SSH Git.
+/// Message returned by [`check_upstream`] when `PKGBUILD` is absent locally — used by Manage “check all”
+/// to offer a bulk download action.
+pub const CHECK_UPSTREAM_PKGBUILD_MISSING_MSG: &str =
+    "PKGBUILD is missing — use Sync or create the file first.";
+
+/// What: Detects the “no local PKGBUILD” outcome from [`check_upstream`].
 ///
 /// Inputs:
-/// - `work_dir`: configured maintainer work directory.
-/// - `pkg`: wizard-built [`PackageDef`] (pkgbase in `pkg.id`).
-/// - `events`: streamed [`LogLine`]s for validate, `makepkg --printsrcinfo`, and git.
-/// - `remote_history`: [`RegisterRemoteHistoryMode::StrictEmptyRemoteOnly`] stops when
-///   `origin/master` already has commits; [`RegisterRemoteHistoryMode::AllowExistingRemoteHistory`]
-///   continues after `git fetch`.
+/// - `err`: error returned when the on-disk tree has no `PKGBUILD`.
 ///
 /// Output:
-/// - `Ok(())` when the push completes (or there was nothing to commit, which is unusual).
+/// - `true` when `err` matches [`CHECK_UPSTREAM_PKGBUILD_MISSING_MSG`].
 ///
 /// Details:
-/// - Runs [`pkgbase::check_pkgbase_publish_namespace`] before heavy work; calls
-///   [`validate::run_all`] then [`build_wf::write_srcinfo`] before cloning; stages
-///   with [`aur_git::stage_files`] and pushes with [`aur_git::commit_and_push`].
-pub async fn register_on_aur(
+/// - [`AdminError::Other`] wraps an `anyhow` message; comparison uses the full string.
+pub fn is_missing_pkgbuild_upstream_error(err: &AdminError) -> bool {
+    matches!(
+        err,
+        AdminError::Other(e) if e.to_string() == CHECK_UPSTREAM_PKGBUILD_MISSING_MSG
+    )
+}
+
+/// What: Register wizard **prepare** step — everything up to and including staging into the clone,
+/// but **no** commit or push.
+///
+/// Inputs:
+/// - `work_dir`, `pkg`, `events`, `remote_history`: same inputs the Register wizard passes before push.
+///
+/// Output:
+/// - `Ok(())` when `PKGBUILD` + `.SRCINFO` are staged in `<work_dir>/aur/<pkgbase>` and ready to commit.
+///
+/// Details:
+/// - Caller should run [`register_push_initial_import_on_aur`] after review. Changing
+///   [`RegisterRemoteHistoryMode`] requires running prepare again before pushing.
+pub async fn register_prepare_on_aur(
     work_dir: &Path,
     pkg: &PackageDef,
     events: &Sender<LogLine>,
@@ -111,15 +131,12 @@ pub async fn register_on_aur(
 ) -> Result<(), AdminError> {
     register_precheck_ids(pkg)?;
     register_namespace_gate(pkg).await?;
-    register_refuse_root(events).await?;
     let build_dir = register_resolve_build_dir(work_dir, pkg)?;
-    register_ensure_pkgbuild(&build_dir)?;
-    register_run_validate(&build_dir, events).await?;
-    build_wf::write_srcinfo(&build_dir, events)
+    aur_git::ensure_default_aur_gitignore_if_missing(&build_dir)
         .await
         .map_err(AdminError::Other)?;
     let ssh_url = pkg.aur_ssh_url();
-    register_ls_remote_preview(&ssh_url, events).await?;
+    prepare_pkgdir_for_aur_push(&build_dir, Some(ssh_url.as_str()), events).await?;
     let clone_dir = aur_git::ensure_clone(work_dir, &pkg.id, &ssh_url, events)
         .await
         .map_err(AdminError::Other)?;
@@ -128,9 +145,81 @@ pub async fn register_on_aur(
     aur_git::stage_files(&build_dir, &clone_dir)
         .await
         .map_err(AdminError::Other)?;
+    Ok(())
+}
+
+/// What: Register wizard **push** step — refresh `.SRCINFO`, re-stage, then commit and push.
+///
+/// Inputs:
+/// - `work_dir`, `pkg`, `events`: same as [`register_prepare_on_aur`].
+///
+/// Output:
+/// - `Ok(())` when the push completes (or `git` reports nothing to commit).
+///
+/// Details:
+/// - Expects a successful [`register_prepare_on_aur`] first (clone must exist). Regenerates
+///   `.SRCINFO` so edits since prepare are reflected without re-running the full validation gate.
+pub async fn register_push_initial_import_on_aur(
+    work_dir: &Path,
+    pkg: &PackageDef,
+    events: &Sender<LogLine>,
+) -> Result<(), AdminError> {
+    register_precheck_ids(pkg)?;
+    register_namespace_gate(pkg).await?;
+    register_refuse_root(events).await?;
+    let build_dir = register_resolve_build_dir(work_dir, pkg)?;
+    aur_git::ensure_default_aur_gitignore_if_missing(&build_dir)
+        .await
+        .map_err(AdminError::Other)?;
+    register_ensure_pkgbuild(&build_dir)?;
+    let clone_dir = aur_git::aur_clone_dir(work_dir, &pkg.id);
+    if !clone_dir.join(".git").is_dir() {
+        return Err(AdminError::RegisterPrecheck(
+            "AUR clone is missing — run “Validate, clone, and stage” first.",
+        ));
+    }
+    build_wf::write_srcinfo(&build_dir, events)
+        .await
+        .map_err(AdminError::Other)?;
+    register_require_master_branch(&clone_dir, events).await?;
+    aur_git::stage_files(&build_dir, &clone_dir)
+        .await
+        .map_err(AdminError::Other)?;
     aur_git::commit_and_push(&clone_dir, "Initial import", events)
         .await
         .map_err(AdminError::Other)?;
+    Ok(())
+}
+
+/// What: Validates the PKGBUILD tree and writes `.SRCINFO` before any AUR clone work — shared
+/// by Register and Publish **Prepare** so both flows use the same gate.
+///
+/// Inputs:
+/// - `build_dir`: directory containing `PKGBUILD` (typically [`sync::package_dir`]`(...)`).
+/// - `aur_ssh_url`: when `Some`, runs a best-effort [`aur_git::ls_remote_has_any_ref`] preview
+///   (errors are logged, not fatal).
+/// - `events`: streamed [`LogLine`]s from validation and `makepkg`.
+///
+/// Output:
+/// - `Ok(())` when required-tier validation passes and `.SRCINFO` was regenerated.
+///
+/// Details:
+/// - Refuses root before `makepkg` (same as Register). Publish **Prepare** should call this
+///   before [`aur_git::ensure_clone`] so invalid trees fail without cloning.
+pub async fn prepare_pkgdir_for_aur_push(
+    build_dir: &Path,
+    aur_ssh_url: Option<&str>,
+    events: &Sender<LogLine>,
+) -> Result<(), AdminError> {
+    register_refuse_root(events).await?;
+    register_ensure_pkgbuild(build_dir)?;
+    register_run_validate(build_dir, events).await?;
+    build_wf::write_srcinfo(build_dir, events)
+        .await
+        .map_err(AdminError::Other)?;
+    if let Some(url) = aur_ssh_url {
+        register_ls_remote_preview(url, events).await?;
+    }
     Ok(())
 }
 
@@ -321,6 +410,9 @@ async fn register_handle_remote_history(
             aur_git::fetch_origin(clone_dir, events)
                 .await
                 .map_err(AdminError::Other)?;
+            aur_git::integrate_local_master_with_fetched_origin(clone_dir, events)
+                .await
+                .map_err(AdminError::Other)?;
             Ok(())
         }
     }
@@ -395,18 +487,72 @@ pub async fn import_from_aur(_work_dir: &Path, _aur_id: &str) -> Result<PackageD
     Err(AdminError::NotImplemented("Import from existing AUR"))
 }
 
-/// Placeholder. **Intended flow** when implemented:
+/// What: Compares the local `PKGBUILD` on disk with the registry `pkgbuild_url` snapshot.
 ///
-/// 1. `GET pkg.pkgbuild_url` and extract the top-level `pkgver=` line.
-/// 2. Read the local copy under `<work_dir>/<pkg.id>/PKGBUILD` and extract
-///    the same field (missing file → [`UpdateStatus::Unknown`]).
-/// 3. Compare as `rpm-vercmp`/`pacman-vercmp`-style versions; for the MVP a
-///    lexicographic compare is acceptable.
-pub async fn check_upstream(
-    _work_dir: &Path,
-    _pkg: &PackageDef,
-) -> Result<UpdateStatus, AdminError> {
-    Err(AdminError::NotImplemented("Check upstream updates"))
+/// Inputs:
+/// - `work_dir`: configured maintainer work directory.
+/// - `pkg`: registry row (URL + destination resolution).
+///
+/// Output:
+/// - [`UpdateStatus::UpToDate`] when normalized bodies match.
+/// - [`UpdateStatus::Outdated`] with a unified diff when they differ.
+///
+/// Details:
+/// - Fetches upstream with the same TLS + user-agent stack as Sync ([`sync::fetch_pkgbuild_text`]).
+/// - CRLF is normalized to LF before equality and diffing.
+pub async fn check_upstream(work_dir: &Path, pkg: &PackageDef) -> Result<UpdateStatus, AdminError> {
+    let url = pkg.pkgbuild_url.trim();
+    if url.is_empty() {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "No PKGBUILD URL — add one under Edit package."
+        )));
+    }
+    let Some(dir) = sync::package_dir(Some(work_dir), pkg) else {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "Could not resolve the package directory — set a working directory or Sync destination."
+        )));
+    };
+    let local_text = match pkgbuild_edit::read_pkgbuild(&dir).await {
+        Ok(t) => t,
+        Err(pkgbuild_edit::PkgbuildEditError::NotFound(_)) => {
+            return Err(AdminError::Other(anyhow::anyhow!(
+                CHECK_UPSTREAM_PKGBUILD_MISSING_MSG
+            )));
+        }
+        Err(e) => return Err(AdminError::Other(e.into())),
+    };
+    let upstream_text = sync::fetch_pkgbuild_text(url)
+        .await
+        .map_err(|e| AdminError::Other(anyhow::anyhow!(e)))?;
+    Ok(classify_local_vs_upstream_pkgbuild(
+        &local_text,
+        &upstream_text,
+    ))
+}
+
+fn normalize_pkgbuild_text(s: &str) -> String {
+    s.replace("\r\n", "\n")
+}
+
+fn classify_local_vs_upstream_pkgbuild(local: &str, upstream: &str) -> UpdateStatus {
+    let loc = normalize_pkgbuild_text(local);
+    let up = normalize_pkgbuild_text(upstream);
+    if loc == up {
+        let version = pkgbuild_edit::parse_quick_fields(&loc)
+            .pkgver
+            .unwrap_or_else(|| "?".into());
+        return UpdateStatus::UpToDate { version };
+    }
+    let lf = pkgbuild_edit::parse_quick_fields(&loc);
+    let uf = pkgbuild_edit::parse_quick_fields(&up);
+    let local = lf.pkgver.unwrap_or_else(|| "?".into());
+    let upstream = uf.pkgver.unwrap_or_else(|| "?".into());
+    let diff = pkgbuild_diff::unified_pkbuild_diff_local_vs_upstream(&loc, &up);
+    UpdateStatus::Outdated {
+        local,
+        upstream,
+        diff,
+    }
 }
 
 /// Placeholder. **Intended flow** when implemented:
@@ -450,4 +596,47 @@ pub async fn open_work_dir(
         )));
     }
     Ok(dir)
+}
+
+#[cfg(test)]
+mod upstream_classify_tests {
+    use super::*;
+
+    #[test]
+    fn identical_after_crlf_normalization_is_up_to_date() {
+        let local = "pkgver=1\n";
+        let remote = "pkgver=1\r\n";
+        match classify_local_vs_upstream_pkgbuild(local, remote) {
+            UpdateStatus::UpToDate { version } => assert_eq!(version, "1"),
+            other => panic!("expected UpToDate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pkgver_bump_is_outdated_with_diff() {
+        let local = "pkgname=x\npkgver=1\npkgrel=1\n";
+        let remote = "pkgname=x\npkgver=2\npkgrel=1\n";
+        let u = classify_local_vs_upstream_pkgbuild(local, remote);
+        let UpdateStatus::Outdated {
+            local,
+            upstream,
+            diff,
+        } = u
+        else {
+            panic!("expected Outdated");
+        };
+        assert_eq!(local, "1");
+        assert_eq!(upstream, "2");
+        assert!(diff.contains("-pkgver=1"));
+        assert!(diff.contains("+pkgver=2"));
+    }
+
+    #[test]
+    fn missing_pkgbuild_upstream_error_round_trip() {
+        let e = AdminError::Other(anyhow::anyhow!(CHECK_UPSTREAM_PKGBUILD_MISSING_MSG));
+        assert!(is_missing_pkgbuild_upstream_error(&e));
+        assert!(!is_missing_pkgbuild_upstream_error(&AdminError::Other(
+            anyhow::anyhow!("network failure")
+        )));
+    }
 }

@@ -8,6 +8,39 @@ use tokio::process::Command;
 
 use super::build::LogLine;
 
+/// Default `.gitignore` for AUR package trees: ignore the working directory except
+/// `PKGBUILD` and `.SRCINFO`.
+///
+/// Details:
+/// - Matches common AUR practice; see wiki guidance on keeping the Git tree free of build artefacts.
+/// - Add extra `!filename` lines locally if you track helper scripts or patches in Git.
+pub const DEFAULT_AUR_GITIGNORE: &str = "*\n!.SRCINFO\n!PKGBUILD\n";
+
+/// What: Writes [`DEFAULT_AUR_GITIGNORE`] to `package_dir/.gitignore` when the file is absent.
+///
+/// Inputs:
+/// - `package_dir`: sync / package folder that will be copied into the AUR clone.
+///
+/// Output:
+/// - `Ok(())` after creating the file or when a `.gitignore` already exists.
+///
+/// Details:
+/// - Atomic write (temp + rename) like other package-dir writers; parents created as needed.
+pub async fn ensure_default_aur_gitignore_if_missing(package_dir: &Path) -> Result<()> {
+    let path = package_dir.join(".gitignore");
+    if path.is_file() {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .context(".gitignore path has no parent directory")?;
+    fs::create_dir_all(parent).await?;
+    let tmp = parent.join(format!(".gitignore.{}.tmp", std::process::id()));
+    fs::write(&tmp, DEFAULT_AUR_GITIGNORE.as_bytes()).await?;
+    fs::rename(&tmp, &path).await?;
+    Ok(())
+}
+
 /// Layout: `<work_dir>/aur/<pkgname>` is the AUR git clone.
 pub fn aur_clone_dir(work_dir: &Path, pkg_id: &str) -> PathBuf {
     work_dir.join("aur").join(pkg_id)
@@ -123,6 +156,96 @@ pub async fn ls_remote_has_any_ref(ssh_url: &str, events: &Sender<LogLine>) -> R
     Ok(any)
 }
 
+/// What: Detects whether `PKGBUILD` exists at the tip of the remote default branch
+/// without using the persistent `<work_dir>/aur/<pkg>` clone.
+///
+/// Inputs:
+/// - `ssh_url`: AUR Git URL (`ssh://aur@aur.archlinux.org/<pkgbase>.git` or a `file://` test remote).
+///
+/// Output:
+/// - `Ok(false)` when `git ls-remote` shows no refs (empty remote) or the shallow clone
+///   succeeds but `PKGBUILD` is absent.
+/// - `Ok(true)` when the shallow working tree contains `PKGBUILD`.
+///
+/// Details:
+/// - Uses `git ls-remote` first so empty bare remotes never attempt `git clone` (which would fail).
+/// - Clones with `--branch master` because AUR packages use `master` and bare remotes may not
+///   advertise `HEAD`, in which case a plain shallow clone can leave an empty work tree.
+/// - Clones into `std::env::temp_dir()` under a unique directory name, then deletes it.
+/// - Uses discrete `Command` arguments; stderr is included when a `git` step fails.
+pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
+    let ls_out = Command::new("git")
+        .arg("ls-remote")
+        .arg(ssh_url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .context("spawning git ls-remote for remote PKGBUILD probe")?;
+
+    if !ls_out.status.success() {
+        let err = String::from_utf8_lossy(&ls_out.stderr);
+        anyhow::bail!("git ls-remote failed ({}): {}", ls_out.status, err.trim());
+    }
+    let ls_stdout = String::from_utf8_lossy(&ls_out.stdout);
+    let any_ref = ls_stdout.lines().any(|l| !l.trim().is_empty());
+    if !any_ref {
+        return Ok(false);
+    }
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let clone_dest = std::env::temp_dir().join(format!(
+        "aur-pkgbuilder-remote-pkgbuild-probe-{}-{stamp}",
+        std::process::id()
+    ));
+
+    if clone_dest.exists() {
+        fs::remove_dir_all(&clone_dest)
+            .await
+            .with_context(|| format!("clearing stale probe dir {}", clone_dest.display()))?;
+    }
+
+    let clone_out = Command::new("git")
+        .arg("-c")
+        .arg("init.defaultBranch=master")
+        .arg("clone")
+        .arg("--depth")
+        .arg("1")
+        .arg("--branch")
+        .arg("master")
+        .arg(ssh_url)
+        .arg(&clone_dest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .context("spawning git clone for remote PKGBUILD probe")?;
+
+    if !clone_out.status.success() {
+        let stderr = String::from_utf8_lossy(&clone_out.stderr);
+        let _ = fs::remove_dir_all(&clone_dest).await;
+        anyhow::bail!(
+            "git clone for PKGBUILD probe failed ({}): {}",
+            clone_out.status,
+            stderr.trim()
+        );
+    }
+
+    let has = clone_dest.join("PKGBUILD").is_file();
+    if let Err(e) = fs::remove_dir_all(&clone_dest).await {
+        anyhow::bail!(
+            "could not remove temporary probe clone {}: {e}",
+            clone_dest.display()
+        );
+    }
+    Ok(has)
+}
+
 /// What: Returns `true` when `origin/master` resolves to a commit in `clone_dir`.
 ///
 /// Inputs:
@@ -230,10 +353,150 @@ pub async fn fetch_origin(clone_dir: &Path, events: &Sender<LogLine>) -> Result<
     .await
 }
 
-/// Copy `PKGBUILD` (and any existing `.SRCINFO`) from the build dir into the
+/// What: Aligns the current branch with `origin/master` after [`fetch_origin`], without silent
+/// history rewrites — fast-forward when behind, no-op when ahead, `git rebase origin/master` when
+/// diverged.
+///
+/// Inputs:
+/// - `clone_dir`: AUR working tree (expected on `master`).
+/// - `events`: log sink for merge/rebase transcripts.
+///
+/// Output:
+/// - `Ok(())` when the tree matches `origin/master` or local-only commits remain on top.
+///
+/// Details:
+/// - Refuses when [`git status --porcelain`] is non-empty so stray edits are not clobbered.
+/// - Used by Register’s **allow existing remote history** path after fetch; Publish does not call
+///   this helper today.
+pub async fn integrate_local_master_with_fetched_origin(
+    clone_dir: &Path,
+    events: &Sender<LogLine>,
+) -> Result<()> {
+    let porcelain = git_status_porcelain(clone_dir).await?;
+    if !porcelain.trim().is_empty() {
+        anyhow::bail!(
+            "the AUR clone at {} has local modifications; commit or reset before integrating remote history",
+            clone_dir.display()
+        );
+    }
+    let head = git_rev_parse(clone_dir, "HEAD").await?;
+    let origin_m = git_rev_parse(clone_dir, "origin/master").await?;
+    if head == origin_m {
+        let _ = events
+            .send(LogLine::Info(
+                "Local HEAD matches origin/master after fetch — nothing to merge or rebase.".into(),
+            ))
+            .await;
+        return Ok(());
+    }
+    let head_ancestor_of_origin =
+        merge_base_is_ancestor(clone_dir, "HEAD", "origin/master").await?;
+    let origin_ancestor_of_head =
+        merge_base_is_ancestor(clone_dir, "origin/master", "HEAD").await?;
+
+    if head_ancestor_of_origin {
+        let _ = events
+            .send(LogLine::Info(
+                "Local master is behind origin/master — fast-forward merging.".into(),
+            ))
+            .await;
+        run_capture(
+            Command::new("git")
+                .arg("merge")
+                .arg("--ff-only")
+                .arg("origin/master"),
+            clone_dir,
+            events,
+        )
+        .await?;
+        return Ok(());
+    }
+    if origin_ancestor_of_head {
+        let _ = events
+            .send(LogLine::Info(
+                "Local master is ahead of origin/master — continuing with your unpushed commits on top."
+                    .into(),
+            ))
+            .await;
+        return Ok(());
+    }
+    let _ = events
+        .send(LogLine::Info(
+            "Local master and origin/master diverged — rebasing onto origin/master.".into(),
+        ))
+        .await;
+    run_capture(
+        Command::new("git").arg("rebase").arg("origin/master"),
+        clone_dir,
+        events,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn git_status_porcelain(clone_dir: &Path) -> Result<String> {
+    let output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .context("spawning git status --porcelain")?;
+    if !output.status.success() {
+        anyhow::bail!("git status --porcelain exited {}", output.status);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+async fn git_rev_parse(clone_dir: &Path, rev: &str) -> Result<String> {
+    let output = Command::new("git")
+        .arg("rev-parse")
+        .arg(rev)
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .context("spawning git rev-parse")?;
+    if !output.status.success() {
+        anyhow::bail!("git rev-parse {rev} exited {}", output.status);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+async fn merge_base_is_ancestor(
+    clone_dir: &Path,
+    ancestor: &str,
+    descendant: &str,
+) -> Result<bool> {
+    let status = Command::new("git")
+        .arg("merge-base")
+        .arg("--is-ancestor")
+        .arg(ancestor)
+        .arg(descendant)
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .context("spawning git merge-base --is-ancestor")?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        Some(c) => anyhow::bail!("git merge-base --is-ancestor exited with {c}"),
+        None => anyhow::bail!("git merge-base --is-ancestor: no exit code"),
+    }
+}
+
+/// Copy `PKGBUILD`, `.SRCINFO`, and `.gitignore` (when present in `build_dir`) into the
 /// AUR clone, overwriting the previous content.
 pub async fn stage_files(build_dir: &Path, clone_dir: &Path) -> Result<()> {
-    for name in ["PKGBUILD", ".SRCINFO"] {
+    for name in ["PKGBUILD", ".SRCINFO", ".gitignore"] {
         let src = build_dir.join(name);
         if src.is_file() {
             let dst = clone_dir.join(name);
@@ -295,21 +558,19 @@ pub async fn diff(clone_dir: &Path) -> Result<String> {
     Ok(out)
 }
 
-/// Stage PKGBUILD + .SRCINFO, commit with `message`, push to origin.
+/// Stage `PKGBUILD` and `.SRCINFO`, plus `.gitignore` when that file exists in the clone,
+/// then commit with `message` and push to `origin`.
 pub async fn commit_and_push(
     clone_dir: &Path,
     message: &str,
     events: &Sender<LogLine>,
 ) -> Result<()> {
-    run_capture(
-        Command::new("git")
-            .arg("add")
-            .arg("PKGBUILD")
-            .arg(".SRCINFO"),
-        clone_dir,
-        events,
-    )
-    .await?;
+    let mut add = Command::new("git");
+    add.arg("add").arg("PKGBUILD").arg(".SRCINFO");
+    if clone_dir.join(".gitignore").is_file() {
+        add.arg(".gitignore");
+    }
+    run_capture(&mut add, clone_dir, events).await?;
 
     let status = Command::new("git")
         .arg("status")
@@ -419,6 +680,152 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_tree_has_pkgbuild_false_on_empty_bare() {
+        let root = workspace_test_dir("aur_git_test_remote_pkgbuild_empty");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let bare = root.join("remote.git");
+        assert!(
+            StdCommand::new("git")
+                .args(["init", "--bare"])
+                .arg(&bare)
+                .status()
+                .expect("git init --bare")
+                .success()
+        );
+        let url = format!("file://{}", bare.display());
+        let has = remote_tree_has_pkgbuild(&url)
+            .await
+            .expect("probe empty bare");
+        assert!(!has);
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn remote_tree_has_pkgbuild_false_when_commit_has_no_pkgbuild() {
+        let root = workspace_test_dir("aur_git_test_remote_pkgbuild_no_file");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let bare = root.join("remote.git");
+        let wc = root.join("wc");
+        assert!(
+            StdCommand::new("git")
+                .args(["init", "--bare"])
+                .arg(&bare)
+                .status()
+                .expect("init bare")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .arg("clone")
+                .arg(format!("file://{}", bare.display()))
+                .arg(&wc)
+                .status()
+                .expect("clone")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["commit", "--allow-empty", "-m", "init"])
+                .status()
+                .expect("commit")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc)
+                .args(["push", "origin", "HEAD:master"])
+                .status()
+                .expect("push")
+                .success()
+        );
+        let url = format!("file://{}", bare.display());
+        let has = remote_tree_has_pkgbuild(&url)
+            .await
+            .expect("probe populated bare");
+        assert!(!has);
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn remote_tree_has_pkgbuild_true_when_remote_has_pkgbuild() {
+        let root = workspace_test_dir("aur_git_test_remote_pkgbuild_yes");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let bare = root.join("remote.git");
+        let wc = root.join("wc");
+        assert!(
+            StdCommand::new("git")
+                .args(["init", "--bare"])
+                .arg(&bare)
+                .status()
+                .expect("init bare")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .arg("clone")
+                .arg(format!("file://{}", bare.display()))
+                .arg(&wc)
+                .status()
+                .expect("clone")
+                .success()
+        );
+        std::fs::write(
+            wc.join("PKGBUILD"),
+            r"# Maintainer: t <t@t>
+pkgname=demo
+pkgver=1
+pkgrel=1
+pkgdesc=d
+arch=('any')
+package() { true; }
+",
+        )
+        .expect("write PKGBUILD");
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["add", "PKGBUILD"])
+                .status()
+                .expect("add")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["commit", "-m", "add pkgbuild"])
+                .status()
+                .expect("commit")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc)
+                .args(["push", "origin", "HEAD:master"])
+                .status()
+                .expect("push")
+                .success()
+        );
+        let url = format!("file://{}", bare.display());
+        let has = remote_tree_has_pkgbuild(&url)
+            .await
+            .expect("probe with PKGBUILD");
+        assert!(has);
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
     async fn ls_remote_sees_master_on_populated_bare() {
         let root = workspace_test_dir("aur_git_test_ls_populated");
         rm_rf_sync(&root);
@@ -446,6 +853,7 @@ mod tests {
             StdCommand::new("git")
                 .args(["-C"])
                 .arg(&wc)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
                 .args(["commit", "--allow-empty", "-m", "init"])
                 .status()
                 .expect("commit")
@@ -511,6 +919,139 @@ mod tests {
             String::from_utf8_lossy(&cur.stdout).trim(),
             "master",
             "expected master after rename"
+        );
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn integrate_fast_forward_when_behind_after_fetch() {
+        let root = workspace_test_dir("aur_git_test_integrate_ff_behind");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let bare = root.join("remote.git");
+        let wc_a = root.join("wc_a");
+        let wc_b = root.join("wc_b");
+        assert!(
+            StdCommand::new("git")
+                .args(["init", "-b", "master", "--bare"])
+                .arg(&bare)
+                .status()
+                .expect("init bare")
+                .success()
+        );
+        let url = format!("file://{}", bare.display());
+        assert!(
+            StdCommand::new("git")
+                .arg("clone")
+                .arg(&url)
+                .arg(&wc_a)
+                .status()
+                .expect("clone a")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc_a)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["commit", "--allow-empty", "-m", "first"])
+                .status()
+                .expect("commit a")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc_a)
+                .args(["push", "-u", "origin", "master"])
+                .status()
+                .expect("push a")
+                .success()
+        );
+
+        assert!(
+            StdCommand::new("git")
+                .arg("clone")
+                .arg(&url)
+                .arg(&wc_b)
+                .status()
+                .expect("clone b")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc_b)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(["commit", "--allow-empty", "-m", "second"])
+                .status()
+                .expect("commit b")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .args(["-C"])
+                .arg(&wc_b)
+                .args(["push", "origin", "master"])
+                .status()
+                .expect("push b")
+                .success()
+        );
+
+        let (tx, rx) = async_channel::unbounded::<LogLine>();
+        let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
+        fetch_origin(&wc_a, &tx).await.expect("fetch");
+        integrate_local_master_with_fetched_origin(&wc_a, &tx)
+            .await
+            .expect("integrate");
+        drop(tx);
+        let _ = drain.await;
+        let head = StdCommand::new("git")
+            .args(["-C"])
+            .arg(&wc_a)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev head");
+        let om = StdCommand::new("git")
+            .args(["-C"])
+            .arg(&wc_a)
+            .args(["rev-parse", "origin/master"])
+            .output()
+            .expect("rev om");
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).trim(),
+            String::from_utf8_lossy(&om.stdout).trim()
+        );
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn ensure_default_aur_gitignore_creates_expected_file() {
+        let root = workspace_test_dir("aur_git_test_gitignore_create");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        ensure_default_aur_gitignore_if_missing(&root)
+            .await
+            .expect("write");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).expect("read"),
+            DEFAULT_AUR_GITIGNORE
+        );
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn ensure_default_aur_gitignore_skips_existing() {
+        let root = workspace_test_dir("aur_git_test_gitignore_keep");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::write(root.join(".gitignore"), "keep-me\n").expect("seed");
+        ensure_default_aur_gitignore_if_missing(&root)
+            .await
+            .expect("noop");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).expect("read"),
+            "keep-me\n"
         );
         rm_rf_sync(&root);
     }

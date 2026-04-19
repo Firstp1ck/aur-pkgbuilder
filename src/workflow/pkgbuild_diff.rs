@@ -3,6 +3,33 @@
 
 use similar::{ChangeTag, TextDiff};
 
+/// What: Unified line diff between two PKGBUILD bodies (same style as `git diff`).
+///
+/// Inputs:
+/// - `local`: on-disk / working copy text.
+/// - `upstream`: freshly fetched upstream text.
+///
+/// Output:
+/// - Unified diff string with headers `PKGBUILD (local)` vs `PKGBUILD (upstream)`.
+///
+/// Details:
+/// - Minus lines are present locally but not upstream; plus lines are upstream additions.
+/// - Uses three lines of context, matching a typical short `git diff` hunk.
+pub fn unified_pkbuild_diff_local_vs_upstream(local: &str, upstream: &str) -> String {
+    let diff = TextDiff::from_lines(local, upstream);
+    let rendered = diff
+        .unified_diff()
+        .context_radius(3)
+        .header("PKGBUILD (local)", "PKGBUILD (upstream)")
+        .to_string();
+    if rendered.trim().is_empty() {
+        "(no line-level differences after normalization — files may differ only in line endings.)"
+            .to_string()
+    } else {
+        rendered
+    }
+}
+
 /// What: Line diff between saved baseline text and the current buffer.
 ///
 /// Output:
@@ -73,5 +100,15 @@ mod tests {
         let d = diff_pkgbuild_lines(s, s);
         assert!(d.inserted_lines.is_empty());
         assert!(d.removed_lines.is_empty());
+    }
+
+    #[test]
+    fn unified_local_vs_upstream_shows_pkgver_change() {
+        let local = "pkgname=foo\npkgver=1\npkgrel=1\n";
+        let upstream = "pkgname=foo\npkgver=2\npkgrel=1\n";
+        let u = unified_pkbuild_diff_local_vs_upstream(local, upstream);
+        assert!(u.contains("-pkgver=1"));
+        assert!(u.contains("+pkgver=2"));
+        assert!(u.contains("PKGBUILD (local)"));
     }
 }

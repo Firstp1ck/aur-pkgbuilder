@@ -37,6 +37,7 @@ const REGISTRY_HEADER: &str = "\
 //   destination_dir  optional absolute folder for PKGBUILD + builds (null = work_dir/id)
 //   sync_subdir      legacy relative path under work_dir (ignored if destination_dir is set)
 //   pkgbuild_refreshed_at_unix  optional Unix time when PKGBUILD was last Sync-downloaded or Version-Reloaded
+//   favorite      optional bool — when true, Home shows this entry in the Favorites section (default false)
 ";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

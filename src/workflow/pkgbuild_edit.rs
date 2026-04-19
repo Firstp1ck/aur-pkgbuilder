@@ -53,6 +53,64 @@ pub async fn read_pkgbuild(package_dir: &Path) -> Result<String, PkgbuildEditErr
         .map_err(PkgbuildEditError::from)
 }
 
+/// What: Minimal PKGBUILD text for greenfield AUR registration (user replaces TODOs).
+///
+/// Inputs:
+/// - `pkgbase`: AUR pkgbase / `pkgname` for a simple single-package build.
+///
+/// Output:
+/// - PKGBUILD source intended to pass required [`crate::workflow::validate`] checks once paths exist.
+///
+/// Details:
+/// - No `source` array — `makepkg --verifysource` succeeds with nothing to fetch.
+/// - Maintainer line is a visible placeholder; the Version-style editor can replace it.
+pub fn starter_pkgbuild_for_register(pkgbase: &str) -> String {
+    format!(
+        r#"# Maintainer: TODO: Your Name <your.email@example.com>
+pkgname={pkgbase}
+pkgver=0
+pkgrel=1
+pkgdesc="TODO: short description for the AUR (edit this starter PKGBUILD)"
+arch=('any')
+license=('MIT')
+
+package() {{
+  true
+}}
+"#
+    )
+}
+
+/// What happened when ensuring a starter PKGBUILD on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StarterPkgbuildOutcome {
+    /// Wrote a new `PKGBUILD` because none was present.
+    Created,
+    /// Left the existing file untouched.
+    SkippedExisting,
+}
+
+/// What: Create `PKGBUILD` in `package_dir` only when the file is absent.
+///
+/// Inputs:
+/// - `package_dir`: Directory that should contain `PKGBUILD` (parents created on write).
+/// - `pkgbase`: Value for `pkgname=` (must already satisfy pkgbase rules from the editor).
+///
+/// Output:
+/// - [`StarterPkgbuildOutcome`] after an atomic write, or an error if creation failed.
+pub async fn ensure_starter_pkgbuild_if_missing(
+    package_dir: &Path,
+    pkgbase: &str,
+) -> Result<StarterPkgbuildOutcome, PkgbuildEditError> {
+    let path = package_dir.join("PKGBUILD");
+    if path.is_file() {
+        return Ok(StarterPkgbuildOutcome::SkippedExisting);
+    }
+    let text = starter_pkgbuild_for_register(pkgbase);
+    write_pkgbuild(package_dir, &text).await?;
+    Ok(StarterPkgbuildOutcome::Created)
+}
+
 /// Atomically write `PKGBUILD` in `package_dir`.
 pub async fn write_pkgbuild(package_dir: &Path, content: &str) -> Result<(), PkgbuildEditError> {
     let path = package_dir.join("PKGBUILD");
@@ -321,6 +379,8 @@ fn insert_before_first_function(content: &str, new_line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -366,5 +426,58 @@ mod tests {
         let got = merge_quick_fields(src, &f);
         assert!(got.contains("# Maintainer: Me <me@x>"));
         assert!(got.contains("#!/bin/bash"));
+    }
+
+    #[test]
+    fn starter_pkgbuild_contains_pkgbase_and_package() {
+        let text = starter_pkgbuild_for_register("my-aur-pkg");
+        assert!(text.contains("pkgname=my-aur-pkg"));
+        assert!(text.contains("package()"));
+    }
+
+    /// What: Confirms the starter template is valid bash (same gate as `validate`’s bash check).
+    #[test]
+    fn starter_pkgbuild_passes_bash_n() {
+        let text = starter_pkgbuild_for_register("demo-pkg");
+        let out = std::process::Command::new("bash")
+            .args(["-n", "/dev/stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                let stdin = child
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| std::io::Error::other("no stdin"))?;
+                stdin.write_all(text.as_bytes())?;
+                stdin.flush()?;
+                child.wait()
+            });
+        assert!(
+            out.is_ok_and(|s| s.success()),
+            "bash -n should accept starter PKGBUILD"
+        );
+    }
+
+    /// What: `ensure_starter_pkgbuild_if_missing` writes once and skips when `PKGBUILD` exists.
+    #[tokio::test]
+    async fn ensure_starter_pkgbuild_writes_then_skips() {
+        let dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/pkgbuild_edit_test_starter");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let first = ensure_starter_pkgbuild_if_missing(&dir, "starter-id-test")
+            .await
+            .unwrap();
+        assert_eq!(first, StarterPkgbuildOutcome::Created);
+        let second = ensure_starter_pkgbuild_if_missing(&dir, "other")
+            .await
+            .unwrap();
+        assert_eq!(second, StarterPkgbuildOutcome::SkippedExisting);
+        let body = read_pkgbuild(&dir).await.unwrap();
+        assert!(body.contains("pkgname=starter-id-test"));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

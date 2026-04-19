@@ -1,9 +1,106 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use reqwest::StatusCode;
+use thiserror::Error;
 use tokio::fs;
 
 use super::package::PackageDef;
+
+/// User agent for PKGBUILD HTTP fetches (matches [`super::aur_account`] RPC client style).
+fn pkgbuild_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION")))
+        .build()
+}
+
+/// What: Validates PKGBUILD URL trim and `http`/`https` scheme without network I/O.
+///
+/// Inputs:
+/// - `url`: raw PKGBUILD URL from package metadata
+///
+/// Output:
+/// - `Ok(())` when the string is non-empty and starts with `http://` or `https://`
+///
+/// Details:
+/// - Call before [`probe_pkgbuild_url`] or [`download_pkgbuild`] to fail fast in the UI thread.
+pub fn pkgbuild_url_precheck(url: &str) -> Result<(), PkgbuildUrlProbeError> {
+    trimmed_http_pkgbuild_url(url).map(|_| ())
+}
+
+/// Rejects empty or non-http(s) PKGBUILD URLs before any network I/O.
+fn trimmed_http_pkgbuild_url(url: &str) -> Result<&str, PkgbuildUrlProbeError> {
+    let t = url.trim();
+    if t.is_empty() {
+        return Err(PkgbuildUrlProbeError::EmptyUrl);
+    }
+    if !(t.starts_with("https://") || t.starts_with("http://")) {
+        return Err(PkgbuildUrlProbeError::InvalidScheme);
+    }
+    Ok(t)
+}
+
+/// Why a PKGBUILD source URL cannot be downloaded.
+#[derive(Debug, Error)]
+pub enum PkgbuildUrlProbeError {
+    /// Missing URL in package metadata.
+    #[error("No PKGBUILD URL is set — add a raw PKGBUILD URL under Manage → Edit package.")]
+    EmptyUrl,
+    /// URL does not use HTTP or HTTPS.
+    #[error("PKGBUILD URL must start with http:// or https://")]
+    InvalidScheme,
+    /// Server responded 404 (or equivalent) for the PKGBUILD.
+    #[error(
+        "There is no PKGBUILD at that URL yet (HTTP {0}). For a new AUR package the plain file may appear shortly after the empty Git repo is created, or the link may be wrong."
+    )]
+    NotFound(u16),
+    /// Other HTTP error from the source.
+    #[error("PKGBUILD URL returned HTTP {0}")]
+    HttpError(u16),
+    /// Transport / TLS / timeout failure.
+    #[error("Could not reach PKGBUILD URL: {0}")]
+    Request(String),
+}
+
+/// Check whether `url` responds successfully for a GET (same semantics as [`download_pkgbuild`]).
+///
+/// What: Probes the remote so the Sync tab can disable download when nothing is published yet.
+///
+/// Inputs:
+/// - `url`: raw PKGBUILD URL from package metadata
+///
+/// Output:
+/// - `Ok(())` when the server returns success for GET
+/// - `Err(_)` when the URL is invalid, missing, not found, or unreachable
+///
+/// Details:
+/// - Uses TLS verification and the same user agent as [`download_pkgbuild`].
+pub async fn probe_pkgbuild_url(url: &str) -> Result<(), PkgbuildUrlProbeError> {
+    let t = trimmed_http_pkgbuild_url(url)?;
+    let client =
+        pkgbuild_http_client().map_err(|e| PkgbuildUrlProbeError::Request(e.to_string()))?;
+    let resp = client
+        .get(t)
+        .send()
+        .await
+        .map_err(|e| PkgbuildUrlProbeError::Request(e.to_string()))?;
+    let status = resp.status();
+    if status == StatusCode::NOT_FOUND {
+        return Err(PkgbuildUrlProbeError::NotFound(status.as_u16()));
+    }
+    resp.error_for_status().map_err(|e| {
+        if let Some(s) = e.status() {
+            if s == StatusCode::NOT_FOUND {
+                PkgbuildUrlProbeError::NotFound(s.as_u16())
+            } else {
+                PkgbuildUrlProbeError::HttpError(s.as_u16())
+            }
+        } else {
+            PkgbuildUrlProbeError::Request(e.to_string())
+        }
+    })?;
+    Ok(())
+}
 
 /// Resolve the directory for this package’s PKGBUILD and builds.
 ///
@@ -132,12 +229,15 @@ pub async fn download_pkgbuild(
         .await
         .with_context(|| format!("creating {}", dir.display()))?;
 
-    let body = reqwest::Client::new()
-        .get(url)
+    let t = trimmed_http_pkgbuild_url(url).map_err(anyhow::Error::from)?;
+    let body = pkgbuild_http_client()
+        .context("building HTTP client")?
+        .get(t)
         .send()
         .await
-        .with_context(|| format!("GET {url}"))?
-        .error_for_status()?
+        .with_context(|| format!("GET {t}"))?
+        .error_for_status()
+        .with_context(|| format!("GET {t} returned an error"))?
         .text()
         .await?;
 
@@ -146,6 +246,42 @@ pub async fn download_pkgbuild(
         .await
         .with_context(|| format!("writing {}", target.display()))?;
     Ok(target)
+}
+
+/// What: Downloads PKGBUILD text from `url` without writing to disk.
+///
+/// Inputs:
+/// - `url`: same rules as [`download_pkgbuild`] / [`probe_pkgbuild_url`].
+///
+/// Output:
+/// - Decoded UTF-8 body on success.
+///
+/// Details:
+/// - Used by [`crate::workflow::admin::check_upstream`] to compare against the local tree.
+pub async fn fetch_pkgbuild_text(url: &str) -> Result<String, PkgbuildUrlProbeError> {
+    let t = trimmed_http_pkgbuild_url(url)?;
+    let body = pkgbuild_http_client()
+        .map_err(|e| PkgbuildUrlProbeError::Request(e.to_string()))?
+        .get(t)
+        .send()
+        .await
+        .map_err(|e| PkgbuildUrlProbeError::Request(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| {
+            if let Some(s) = e.status() {
+                if s == StatusCode::NOT_FOUND {
+                    PkgbuildUrlProbeError::NotFound(s.as_u16())
+                } else {
+                    PkgbuildUrlProbeError::HttpError(s.as_u16())
+                }
+            } else {
+                PkgbuildUrlProbeError::Request(e.to_string())
+            }
+        })?
+        .text()
+        .await
+        .map_err(|e| PkgbuildUrlProbeError::Request(e.to_string()))?;
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -168,6 +304,7 @@ mod tests {
             destination_dir: destination_dir.map(String::from),
             sync_subdir: sync_subdir.map(String::from),
             pkgbuild_refreshed_at_unix: None,
+            favorite: false,
         }
     }
 
@@ -234,5 +371,33 @@ mod tests {
     #[test]
     fn validate_destination_rejects_dot_dot_component() {
         assert!(validate_destination_path_str("/tmp/../etc").is_err());
+    }
+
+    #[tokio::test]
+    async fn probe_pkgbuild_url_rejects_empty() {
+        let err = super::probe_pkgbuild_url("   ")
+            .await
+            .expect_err("empty url");
+        assert!(matches!(err, super::PkgbuildUrlProbeError::EmptyUrl));
+    }
+
+    #[tokio::test]
+    async fn probe_pkgbuild_url_rejects_non_http_scheme() {
+        let err = super::probe_pkgbuild_url("ftp://example/PKGBUILD")
+            .await
+            .expect_err("ftp");
+        assert!(matches!(err, super::PkgbuildUrlProbeError::InvalidScheme));
+    }
+
+    #[test]
+    fn pkgbuild_url_precheck_rejects_empty_and_bad_scheme() {
+        assert!(matches!(
+            pkgbuild_url_precheck("").unwrap_err(),
+            PkgbuildUrlProbeError::EmptyUrl
+        ));
+        assert!(matches!(
+            pkgbuild_url_precheck("file:///x/PKGBUILD").unwrap_err(),
+            PkgbuildUrlProbeError::InvalidScheme
+        ));
     }
 }

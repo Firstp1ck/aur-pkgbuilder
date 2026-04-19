@@ -32,6 +32,33 @@ impl PackageKind {
     }
 }
 
+/// What: Optional, non-blocking hint when pkgbase naming may not match common AUR patterns for the chosen [`PackageKind`].
+///
+/// Inputs:
+/// - `id`: pkgbase id candidate (leading/trailing whitespace is ignored).
+/// - `kind`: selected kind in the package editor.
+///
+/// Output:
+/// - `Some(hint)` when Kind is binary or git and the id lacks the usual `-bin` / `-git` suffix; [`None`] otherwise.
+///
+/// Details:
+/// - Does not validate pkgbase characters; only checks suffix. Callers must not use this as a save gate.
+pub fn pkgbase_kind_suffix_hint(id: &str, kind: PackageKind) -> Option<&'static str> {
+    let id = id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    match kind {
+        PackageKind::Bin if !id.ends_with("-bin") => Some(
+            "AUR convention: with Kind “binary”, the pkgbase usually ends with “-bin”. You can still save—this is only a hint.",
+        ),
+        PackageKind::Git if !id.ends_with("-git") => Some(
+            "AUR convention: with Kind “git”, the pkgbase usually ends with “-git”. You can still save—this is only a hint.",
+        ),
+        _ => None,
+    }
+}
+
 /// Fully describes one package the app can drive end-to-end.
 ///
 /// Everything the wizard needs lives here: upstream PKGBUILD URL, AUR
@@ -68,6 +95,9 @@ pub struct PackageDef {
     /// from disk on the Version tab — not updated on Save or passive editor load.
     #[serde(default)]
     pub pkgbuild_refreshed_at_unix: Option<i64>,
+    /// When true, the Home tab lists this package under **Favorites** above the rest.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// Age after which the Version tab warns that the PKGBUILD may be stale.
@@ -116,6 +146,26 @@ pub fn record_pkgbuild_refresh(state: &crate::state::AppStateRef) {
     let _ = st.registry.save();
 }
 
+/// What: Records a PKGBUILD **Reload** for a registry row when that package is not the Home selection.
+///
+/// Inputs:
+/// - `pkg_id`: pkgbase id matching [`PackageDef::id`].
+///
+/// Output:
+/// - Updates `pkgbuild_refreshed_at_unix` and saves the registry when a row exists; no-op otherwise.
+///
+/// Details:
+/// - Used by the Register wizard’s PKGBUILD editor ([`crate::ui::pkgbuild_editor`]) so staleness metadata stays accurate.
+pub fn record_pkgbuild_refresh_by_id(state: &crate::state::AppStateRef, pkg_id: &str) {
+    let now = pkgbuild_refresh_clock_now();
+    let mut st = state.borrow_mut();
+    let Some(pkg) = st.registry.packages.iter_mut().find(|p| p.id == pkg_id) else {
+        return;
+    };
+    pkg.pkgbuild_refreshed_at_unix = Some(now);
+    let _ = st.registry.save();
+}
+
 impl PackageDef {
     /// SSH remote for `aur.archlinux.org`.
     pub fn aur_ssh_url(&self) -> String {
@@ -132,6 +182,45 @@ impl PackageDef {
             PackageKind::Git => "folder-remote-symbolic",
             PackageKind::Other => "application-x-addon-symbolic",
         }
+    }
+}
+
+#[cfg(test)]
+mod kind_suffix_hint_tests {
+    use super::*;
+
+    #[test]
+    fn bin_with_bin_suffix_no_hint() {
+        assert_eq!(pkgbase_kind_suffix_hint("foo-bin", PackageKind::Bin), None);
+    }
+
+    #[test]
+    fn bin_without_suffix_hint() {
+        assert!(pkgbase_kind_suffix_hint("foobar", PackageKind::Bin).is_some());
+    }
+
+    #[test]
+    fn git_with_git_suffix_no_hint() {
+        assert_eq!(pkgbase_kind_suffix_hint("foo-git", PackageKind::Git), None);
+    }
+
+    #[test]
+    fn git_without_suffix_hint() {
+        assert!(pkgbase_kind_suffix_hint("foobar", PackageKind::Git).is_some());
+    }
+
+    #[test]
+    fn other_kind_never_hints() {
+        assert_eq!(
+            pkgbase_kind_suffix_hint("anything", PackageKind::Other),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_id_no_hint() {
+        assert_eq!(pkgbase_kind_suffix_hint("", PackageKind::Bin), None);
+        assert_eq!(pkgbase_kind_suffix_hint("  ", PackageKind::Git), None);
     }
 }
 

@@ -37,12 +37,14 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&stale_banner);
 
     content.append(&kind_hint(&pkg));
+    let pkg_source = ui::pkgbuild_editor::PkgbuildEditorPkgSource::SelectedPackage;
     content.append(&ui::pkgbuild_editor::build_section(
         shell,
         state,
-        &pkg,
+        &pkg_source,
         &toasts,
         &stale_banner,
+        None,
     ));
     content.append(&checksum_group(state, &pkg, &toasts));
 
