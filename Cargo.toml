@@ -8,7 +8,7 @@ repository = "https://github.com/Firstp1ck/aur-pkgbuilder"
 
 [dependencies]
 gtk4 = { version = "0.11", features = ["v4_14"] }
-adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 glib = "0.22"
 gio = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "fs"] }

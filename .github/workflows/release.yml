@@ -106,8 +106,8 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-  # Same pattern as pacsea: native ubuntu-latest / ubuntu-24.04-arm + apt (no job container).
-  # Binaries are built against the runner's glibc/GTK stack; PKGBUILD-bin ships them for Arch users.
+  # Native Ubuntu runners + apt (same idea as pacsea). Crate uses libadwaita `v1_5` so
+  # pkg-config matches ubuntu-24.04’s libadwaita 1.5; no job container / pacman.
   build-linux:
     name: Build Linux (${{ matrix.asset }})
     needs: get-version

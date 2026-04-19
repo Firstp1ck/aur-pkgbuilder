@@ -293,7 +293,7 @@ shell, and a push-access remote.
 - Run `cargo update` carefully — pinned major versions in `Cargo.toml`
   (e.g. `gtk4 = "0.11"`, `adw = "0.9"`) match the GTK/libadwaita
   versions available on stable Arch. Bumping them may require bumping
-  the feature flags (`v4_14`, `v1_6`).
+  the feature flags (`v4_14`, `v1_5`).
 - Do not add new dependencies that require `unsafe` for their core
   functionality unless there is no safe alternative and the crate is
   well-maintained.
