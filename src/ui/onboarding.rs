@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, EntryRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -54,21 +54,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     // --- Account group ---
-    let account_group = PreferencesGroup::builder()
-        .title("Login")
-        .description(
-            "No password is exchanged. Your SSH key is set up separately on the \
-             AUR connection screen — that's what authenticates pushes. Brand-new AUR accounts \
-             are sometimes held for manual anti-spam review; if login on the website fails, \
-             wait for approval before pasting SSH keys.",
-        )
-        .build();
     let username_row = EntryRow::builder().title("AUR username").build();
     if let Some(existing) = state.borrow().config.aur_username.clone() {
         username_row.set_text(&existing);
     }
-    account_group.add(&username_row);
-
     let fetch_row = ActionRow::builder()
         .title("Fetch maintained packages")
         .subtitle("Queries the AUR for packages you own or co-maintain.")
@@ -81,8 +70,20 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     fetch_row.add_suffix(&fetch_spinner);
     fetch_row.add_suffix(&fetch_btn);
-    account_group.add(&fetch_row);
-    content.append(&account_group);
+    content.append(&ui::collapsible_preferences_section(
+        "Login",
+        Some(
+            "No password is exchanged. Your SSH key is set up separately on the \
+             AUR connection screen — that's what authenticates pushes. Brand-new AUR accounts \
+             are sometimes held for manual anti-spam review; if login on the website fails, \
+             wait for approval before pasting SSH keys.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&username_row);
+            exp.add_row(&fetch_row);
+        },
+    ));
 
     // --- Results list (populated after fetch; ListBox, not PreferencesGroup, so we can clear rows safely.)
     let results_title = Label::builder()

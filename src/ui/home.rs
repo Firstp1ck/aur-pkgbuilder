@@ -1,8 +1,11 @@
+use std::sync::Once;
+
 use adw::prelude::*;
 use adw::{ActionRow, AlertDialog, HeaderBar, NavigationPage, Toast, ToastOverlay, ToolbarView};
 use gtk4::glib::object::IsA;
 use gtk4::{
-    Align, Box as GtkBox, Button, Image, Label, ListBox, Orientation, ScrolledWindow, Window,
+    Align, Box as GtkBox, Button, CssProvider, Image, Label, ListBox, MenuButton, Orientation,
+    Popover, ScrolledWindow, SizeGroup, SizeGroupMode, Window,
 };
 
 use crate::state::AppStateRef;
@@ -10,8 +13,51 @@ use crate::ui;
 use crate::ui::shell::{MainShell, ProcessTab};
 use crate::workflow::package::PackageDef;
 
+static ADD_PKG_CLUSTER_CSS: Once = Once::new();
+
+/// What: Registers once-per-process CSS for the Home **Add package…** + info [`MenuButton`] cluster.
+///
+/// Inputs:
+/// - None.
+///
+/// Output:
+/// - Installs a display-level [`CssProvider`] the first time it runs.
+///
+/// Details:
+/// - [`MenuButton`]'s inner toggle keeps a visible left border even inside a `linked` box; we only
+///   remove that seam for widgets under `.add-pkg-cluster.linked`.
+fn ensure_add_pkg_cluster_css_installed() {
+    ADD_PKG_CLUSTER_CSS.call_once(|| {
+        let Some(display) = gtk4::gdk::Display::default() else {
+            return;
+        };
+        const CSS: &str = r"
+            .add-pkg-cluster.linked > button {
+              border-top-right-radius: 0;
+              border-bottom-right-radius: 0;
+            }
+            .add-pkg-cluster.linked > menubutton {
+              border-left-width: 0;
+            }
+            .add-pkg-cluster.linked > menubutton > button {
+              border-left-width: 0;
+              border-top-left-radius: 0;
+              border-bottom-left-radius: 0;
+            }
+        ";
+        let provider = CssProvider::new();
+        provider.load_from_string(CSS);
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_USER,
+        );
+    });
+}
+
 /// Build the Home tab. Workflow navigation uses [`MainShell::goto_tab`].
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
+    ensure_add_pkg_cluster_css_installed();
     let toasts = ToastOverlay::new();
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -30,7 +76,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let sub = Label::builder()
         .label(
             "Sync the PKGBUILD from its upstream source, build locally with makepkg, \
-             then push to the AUR. Add your own packages with the button below.",
+             then push to the AUR. Add packages or start AUR registration from the buttons below.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -48,12 +94,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .orientation(Orientation::Horizontal)
         .spacing(8)
         .halign(Align::Start)
+        .vexpand(false)
+        .valign(Align::Start)
         .build();
 
-    let add_btn = Button::builder()
-        .label("Add package…")
-        .css_classes(vec!["pill"])
-        .build();
+    let add_btn = Button::builder().label("Add package…").build();
     {
         let shell = shell.clone();
         let state = state.clone();
@@ -84,7 +129,38 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             });
         });
     }
-    actions_row.append(&add_btn);
+    let add_cluster = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(0)
+        .css_classes(vec!["linked", "add-pkg-cluster"])
+        .vexpand(false)
+        .valign(Align::Start)
+        .build();
+    let add_help = add_package_help_button();
+    let add_height_sync = SizeGroup::new(SizeGroupMode::Vertical);
+    add_height_sync.add_widget(&add_btn);
+    add_height_sync.add_widget(&add_help);
+    add_cluster.append(&add_btn);
+    add_cluster.append(&add_help);
+    actions_row.append(&add_cluster);
+
+    let register_btn = Button::builder()
+        .label("Register new AUR package")
+        .tooltip_text(
+            "Open the Register wizard: define a new pkgbase, validate, and push to create the AUR Git repository.",
+        )
+        .css_classes(vec!["pill"])
+        .build();
+    {
+        let nav = shell.nav();
+        let shell = shell.clone();
+        let state = state.clone();
+        register_btn.connect_clicked(move |_| {
+            let page = ui::register::build(&shell, &state);
+            nav.push(&page);
+        });
+    }
+    actions_row.append(&register_btn);
 
     let manage_btn = Button::builder()
         .label("Manage packages…")
@@ -149,8 +225,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     let footer = Label::builder()
         .label(
-            "Tip: the AUR repo for each package must already exist. First-time \
-             registration is not supported yet. After you apply your username on the AUR \
+            "Tip: use “Register new AUR package” for a first-time pkgbase push; use Publish \
+             when the AUR repo already exists. After you apply your username on the AUR \
              Connection tab, rows in red are not listed for that login as maintainer or \
              co-maintainer in the last RPC check.",
         )
@@ -299,6 +375,52 @@ fn render_package_row(
     }
 
     row
+}
+
+/// What: Builds an info control next to **Add package…** that explains the local registry editor.
+///
+/// Inputs:
+/// - None.
+///
+/// Output:
+/// - A [`MenuButton`] whose popover shows when the user clicks the icon.
+///
+/// Details:
+/// - Parent horizontal `gtk4::Box` uses the `linked` + `add-pkg-cluster` classes; scoped CSS (see
+///   [`ensure_add_pkg_cluster_css_installed`]) strips the inner [`MenuButton`] left border that
+///   `linked` alone does not remove.
+/// - Do not add `.flat` (breaks linked styling) or `.pill` on the sibling text button (rounded
+///   inner edge prevents a merged border between the two segments).
+/// - Do not set `vexpand` on these controls: that would stretch the entire Home action row to the
+///   window height. Match heights via a vertical [`SizeGroup`] on the parent instead.
+fn add_package_help_button() -> MenuButton {
+    const HELP: &str = "Add package… opens the package editor to add or change this app's local \
+        registry entry: pkgbase id, PKGBUILD download URL, package kind, and optional sync or \
+        destination folders.\n\nIt does not create the Git repository on the AUR by itself—that \
+        is what Register new AUR package is for once that flow is complete.\n\nIf your packages \
+        already exist on the AUR, Import from AUR account… can add several rows from your \
+        username at once. Use Add package… when import lists nothing, you are preparing a new \
+        pkgbase before it exists on the AUR, or you need custom paths or titles.";
+    let body = Label::builder()
+        .label(HELP)
+        .wrap(true)
+        .xalign(0.0)
+        .max_width_chars(52)
+        .build();
+    let frame = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    frame.append(&body);
+    let popover = Popover::builder().child(&frame).build();
+    MenuButton::builder()
+        .icon_name("dialog-information-symbolic")
+        .tooltip_text("What does Add package… do?")
+        .popover(&popover)
+        .build()
 }
 
 const DIALOG_ID_LIST_MAX: usize = 12;

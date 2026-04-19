@@ -1,10 +1,11 @@
 //! "Administer AUR packages" screen.
 //!
 //! Lists every registered [`PackageDef`] and exposes per-row admin actions
-//! plus three global operations (register, import, check-all). The actions
-//! route through [`crate::workflow::admin`], which currently returns
-//! [`AdminError::NotImplemented`] for most of them — the UI surfaces a
-//! friendly "coming soon" toast instead of crashing.
+//! plus two global operations (import, check-all). Register-on-AUR starts from
+//! Home. The actions
+//! route through [`crate::workflow::admin`]. Import, check-upstream, and archive
+//! still return [`AdminError::NotImplemented`] — the UI surfaces a friendly
+//! “coming soon” toast instead of crashing.
 
 use adw::prelude::*;
 use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay, Window};
@@ -38,9 +39,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     let sub = Label::builder()
         .label(
-            "Register new AUR repositories, import existing ones, and check for upstream \
-             updates. Lifecycle actions tagged “preview” are stubbed and will land in a \
-             future release.",
+            "Import existing AUR repositories and check for upstream updates. “Register new \
+             AUR package” lives on the Home tab. Lifecycle actions tagged “preview” are stubbed \
+             and will land in a future release.",
         )
         .halign(Align::Start)
         .wrap(true)
@@ -62,37 +63,25 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 // Global ops
 // ---------------------------------------------------------------------------
 
-fn global_actions_group(
-    shell: &MainShell,
-    state: &AppStateRef,
-    toasts: &ToastOverlay,
-) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Lifecycle")
-        .description("Operations that affect an AUR repository as a whole.")
-        .build();
-
-    group.add(&register_row(state, toasts));
-    group.add(&import_row(shell, state, toasts));
-    group.add(&check_all_row(state, toasts));
-    group
+fn global_actions_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
+    ui::collapsible_preferences_section(
+        "Lifecycle",
+        Some("Operations that affect an AUR repository as a whole."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&import_row(shell, state, toasts));
+            exp.add_row(&check_all_row(state, toasts));
+        },
+    )
 }
 
-fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("AUR SSH commands")
-        .description(
-            "Curated picker for the commands aur@aur.archlinux.org accepts — vote, \
-             flag, adopt, disown, list-repos, and friends.",
-        )
-        .build();
+fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> ListBox {
     let row = ActionRow::builder()
         .title("Open SSH commands")
         .subtitle("Uses the SSH key configured on the connection screen.")
         .build();
     let btn = primary_button("Open");
     row.add_suffix(&btn);
-    group.add(&row);
 
     let nav = shell.nav();
     let state = state.clone();
@@ -100,38 +89,17 @@ fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> PreferencesGrou
         let page = ui::aur_ssh::build(&nav, &state);
         nav.push(&page);
     });
-    group
-}
-
-fn register_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
-    let row = ActionRow::builder()
-        .title("Register new AUR package")
-        .subtitle("Initial git push that creates the repository on aur.archlinux.org.")
-        .build();
-    row.add_suffix(&preview_badge());
-    let btn = primary_button("Start");
-    row.add_suffix(&btn);
-
-    let state = state.clone();
-    let toasts = toasts.clone();
-    btn.connect_clicked(move |_| {
-        let Some(pkg) = state.borrow().package.clone() else {
-            toasts.add_toast(Toast::new(
-                "Pick a package on the home screen first, then come back to register it.",
-            ));
-            return;
-        };
-        let Some(work) = state.borrow().config.work_dir.clone() else {
-            toasts.add_toast(Toast::new("Set a working directory first."));
-            return;
-        };
-        let toasts = toasts.clone();
-        runtime::spawn(
-            async move { admin::register_on_aur(&work, &pkg).await },
-            move |res| render_admin_result(&toasts, res, "Registered on AUR"),
-        );
-    });
-    row
+    ui::collapsible_preferences_section(
+        "AUR SSH commands",
+        Some(
+            "Curated picker for the commands aur@aur.archlinux.org accepts — vote, \
+             flag, adopt, disown, list-repos, and friends.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&row);
+        },
+    )
 }
 
 fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
@@ -235,30 +203,32 @@ fn check_all_row(state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
 // Per-package list
 // ---------------------------------------------------------------------------
 
-fn packages_group(
-    shell: &MainShell,
-    state: &AppStateRef,
-    toasts: &ToastOverlay,
-) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Packages")
-        .description("Per-package admin actions.")
-        .build();
-
+fn packages_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
     let packages = state.borrow().registry.packages.clone();
     if packages.is_empty() {
         let empty = ActionRow::builder()
             .title("No packages in the registry")
             .subtitle("Use the home screen's “Add package…” to register one.")
             .build();
-        group.add(&empty);
-        return group;
+        return ui::collapsible_preferences_section(
+            "Packages",
+            Some("Per-package admin actions."),
+            ui::DEFAULT_SECTION_EXPANDED,
+            |exp| {
+                exp.add_row(&empty);
+            },
+        );
     }
 
+    let (list, exp) = ui::collapsible_preferences_section_with_expander(
+        "Packages",
+        Some("Per-package admin actions."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
     for pkg in packages {
-        group.add(&package_admin_row(shell, state, toasts, &pkg));
+        exp.add_row(&package_admin_row(shell, state, toasts, &pkg));
     }
-    group
+    list
 }
 
 fn package_admin_row(

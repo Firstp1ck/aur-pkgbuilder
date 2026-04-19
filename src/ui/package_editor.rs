@@ -9,10 +9,11 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, PreferencesGroup, Window};
+use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, Window};
 use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Label, Orientation, StringList};
 
 use crate::runtime;
+use crate::ui;
 use crate::ui::folder_pick;
 use crate::workflow::package::{PackageDef, PackageKind};
 use crate::workflow::pkgbase::{self, PkgbasePublishNs};
@@ -195,18 +196,6 @@ pub fn open(
         .margin_end(16)
         .build();
 
-    let group = if existing.is_some() {
-        PreferencesGroup::new()
-    } else {
-        PreferencesGroup::builder()
-            .description(
-                "When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
-                 and push; there is no separate approval queue. A first-time Git warning about an \
-                 empty repository is normal until the first accepted push.",
-            )
-            .build()
-    };
-
     let id_feedback = Label::builder()
         .label(PKGBASE_FIELD_HINT)
         .wrap(true)
@@ -289,15 +278,39 @@ pub fn open(
         *legacy_cleared.borrow(),
     );
 
-    group.add(&id_feedback);
-    group.add(&id_row);
-    group.add(&title_row);
-    group.add(&subtitle_row);
-    group.add(&url_row);
-    group.add(&dest_row);
-    group.add(&kind_row);
-    group.add(&icon_row);
-    body.append(&group);
+    let pkg_section = if existing.is_some() {
+        ui::collapsible_preferences_section("Package", None, ui::DEFAULT_SECTION_EXPANDED, |exp| {
+            exp.add_row(&id_feedback);
+            exp.add_row(&id_row);
+            exp.add_row(&title_row);
+            exp.add_row(&subtitle_row);
+            exp.add_row(&url_row);
+            exp.add_row(&dest_row);
+            exp.add_row(&kind_row);
+            exp.add_row(&icon_row);
+        })
+    } else {
+        ui::collapsible_preferences_section(
+            "Package",
+            Some(
+                "When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
+                 and push; there is no separate approval queue. A first-time Git warning about an \
+                 empty repository is normal until the first accepted push.",
+            ),
+            ui::DEFAULT_SECTION_EXPANDED,
+            |exp| {
+                exp.add_row(&id_feedback);
+                exp.add_row(&id_row);
+                exp.add_row(&title_row);
+                exp.add_row(&subtitle_row);
+                exp.add_row(&url_row);
+                exp.add_row(&dest_row);
+                exp.add_row(&kind_row);
+                exp.add_row(&icon_row);
+            },
+        )
+    };
+    body.append(&pkg_section);
 
     let root = GtkBox::builder().orientation(Orientation::Vertical).build();
     root.append(&header);

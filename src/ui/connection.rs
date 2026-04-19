@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, EntryRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::gio;
+use gtk4::glib::clone::Downgrade;
 use gtk4::{Align, Box as GtkBox, Button, FileLauncher, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -114,15 +116,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     // --- AUR account (username) ---
-    let account_group = PreferencesGroup::builder()
-        .title("AUR account")
-        .description(
-            "Same login as on aur.archlinux.org. Used for “Import from AUR account”, RPC \
-             lookups, and opening your profile when pasting SSH keys. Press the apply (✓) \
-             button to save — the AUR is queried first and registered packages are checked \
-             against your maintainer/co-maintainer list.",
-        )
-        .build();
     let username_row = EntryRow::builder()
         .title("AUR username")
         .show_apply_button(true)
@@ -213,35 +206,59 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
     shell.register_connection_aur_username_row(&username_row);
-    account_group.add(&username_row);
-    content.append(&account_group);
+    let account_section = ui::collapsible_preferences_section(
+        "AUR account",
+        Some(
+            "Same login as on aur.archlinux.org. Used for “Import from AUR account”, RPC \
+             lookups, and opening your profile when pasting SSH keys. Press the apply (✓) \
+             button to save — the AUR is queried first and registered packages are checked \
+             against your maintainer/co-maintainer list.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&username_row);
+        },
+    );
+    content.append(&account_section);
 
     // --- Tools group ---
-    let tools_group = PreferencesGroup::builder()
-        .title("Required tools")
-        .description(
-            "These must be on PATH. Missing ones can be installed from the official repos.",
-        )
-        .build();
-    content.append(&tools_group);
+    let (tools_list, tools_exp) = ui::collapsible_preferences_section_with_expander(
+        "Required tools",
+        Some("These must be on PATH. Missing ones can be installed from the official repos."),
+        false,
+    );
+    content.append(&tools_list);
 
-    let recommended_group = PreferencesGroup::builder()
-        .title("Recommended environment")
-        .description(
+    let (recommended_list, recommended_exp) = ui::collapsible_preferences_section_with_expander(
+        "Recommended environment",
+        Some(
             "These are not required to open the app, but they match common maintainer practice: \
              install the `base-devel` group for toolchain completeness, use `fakeroot` for \
              local `makepkg --fakeroot` checks, and add `devtools` so you can run clean-chroot \
              builds (missing host libraries then show up before you push). Typical chroot state \
              lives under `/var/lib/archbuild` after the first root is created. \
              https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot",
-        )
-        .build();
-    content.append(&recommended_group);
+        ),
+        false,
+    );
+    content.append(&recommended_list);
 
     content.append(&packaging_config_shortcuts_group(&toasts));
 
-    let tools_group_weak = tools_group.downgrade();
-    let recommended_group_weak = recommended_group.downgrade();
+    let tools_status_icon = Image::builder().build();
+    tools_status_icon.set_pixel_size(20);
+    tools_status_icon.set_visible(false);
+    tools_exp.add_suffix(&tools_status_icon);
+
+    let recommended_status_icon = Image::builder().build();
+    recommended_status_icon.set_pixel_size(20);
+    recommended_status_icon.set_visible(false);
+    recommended_exp.add_suffix(&recommended_status_icon);
+
+    let tools_group_weak = Downgrade::downgrade(&tools_exp);
+    let recommended_group_weak = Downgrade::downgrade(&recommended_exp);
+    let tools_icon_cb = tools_status_icon.clone();
+    let recommended_icon_cb = recommended_status_icon.clone();
     runtime::spawn(
         async move {
             let required = preflight::check_tools().await;
@@ -249,22 +266,36 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             (required, recommended)
         },
         move |(required, recommended)| {
-            if let Some(group) = tools_group_weak.upgrade() {
+            let required_ok = required.iter().all(tool_row_ok);
+            let recommended_ok = recommended.iter().all(tool_row_ok);
+            if let Some(exp) = tools_group_weak.upgrade() {
                 for check in required {
-                    group.add(&render_tool_row(&check));
+                    exp.add_row(&render_tool_row(&check));
                 }
+                exp.set_expanded(!required_ok);
+                ui::set_collapsed_aggregate_icon(&tools_icon_cb, &exp, Some(required_ok));
+                ui::connect_expander_collapsed_aggregate_refresh(
+                    &exp,
+                    &tools_icon_cb,
+                    Rc::new(move || Some(required_ok)),
+                );
             }
-            if let Some(group) = recommended_group_weak.upgrade() {
+            if let Some(exp) = recommended_group_weak.upgrade() {
                 for check in recommended {
-                    group.add(&render_tool_row(&check));
+                    exp.add_row(&render_tool_row(&check));
                 }
+                exp.set_expanded(!recommended_ok);
+                ui::set_collapsed_aggregate_icon(&recommended_icon_cb, &exp, Some(recommended_ok));
+                ui::connect_expander_collapsed_aggregate_refresh(
+                    &exp,
+                    &recommended_icon_cb,
+                    Rc::new(move || Some(recommended_ok)),
+                );
             }
         },
     );
 
     // --- Paths group ---
-    let paths_group = PreferencesGroup::builder().title("Paths").build();
-
     let workdir = {
         let cfg = &state.borrow().config;
         cfg.work_dir.clone().unwrap_or_default()
@@ -369,16 +400,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
 
-    paths_group.add(&workdir_row);
-    paths_group.add(&ssh_row);
-    content.append(&paths_group);
+    let paths_section = ui::collapsible_preferences_section("Paths", None, false, |exp| {
+        exp.add_row(&workdir_row);
+        exp.add_row(&ssh_row);
+    });
+    content.append(&paths_section);
 
     // --- AUR probe ---
-    let probe_group = PreferencesGroup::builder()
-        .title("aur.archlinux.org")
-        .description("A successful probe means your SSH key is registered on the AUR.")
-        .build();
-
     let setup_row = ActionRow::builder()
         .title("Set up SSH")
         .subtitle("Pick a key, copy its public half, open the AUR account page.")
@@ -389,7 +417,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .css_classes(vec!["pill"])
         .build();
     setup_row.add_suffix(&setup_btn);
-    probe_group.add(&setup_row);
     {
         let nav = shell.nav();
         let shell_ssh = shell.clone();
@@ -419,8 +446,16 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     probe_row.add_suffix(&probe_status);
     probe_row.add_suffix(&probe_spinner);
     probe_row.add_suffix(&probe_btn);
-    probe_group.add(&probe_row);
-    content.append(&probe_group);
+    let probe_section = ui::collapsible_preferences_section(
+        "AUR Archlinux",
+        Some("aur.archlinux.org — A successful probe means your SSH key is registered on the AUR."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&setup_row);
+            exp.add_row(&probe_row);
+        },
+    );
+    content.append(&probe_section);
 
     // --- Continue button ---
     //
@@ -575,15 +610,7 @@ fn connect_open_packaging_target(
     });
 }
 
-fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Packaging configuration")
-        .description(
-            "Opens fixed system paths with your desktop default application (via GTK). \
-             If nothing happens, set a default handler for `.conf` files or folders.",
-        )
-        .build();
-
+fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> gtk4::ListBox {
     let makepkg_row = ActionRow::builder()
         .title("makepkg.conf")
         .subtitle("/etc/makepkg.conf")
@@ -595,7 +622,6 @@ fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> PreferencesGroup {
         .build();
     makepkg_row.add_suffix(&makepkg_btn);
     connect_open_packaging_target(&makepkg_btn, toasts, PackagingConfigTarget::MakepkgConf);
-    group.add(&makepkg_row);
 
     let devtools_row = ActionRow::builder()
         .title("devtools files")
@@ -612,7 +638,17 @@ fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> PreferencesGroup {
         toasts,
         PackagingConfigTarget::DevtoolsShareDir,
     );
-    group.add(&devtools_row);
 
-    group
+    ui::collapsible_preferences_section(
+        "Packaging configuration",
+        Some(
+            "Opens fixed system paths with your desktop default application (via GTK). \
+             If nothing happens, set a default handler for `.conf` files or folders.",
+        ),
+        false,
+        |exp| {
+            exp.add_row(&makepkg_row);
+            exp.add_row(&devtools_row);
+        },
+    )
 }

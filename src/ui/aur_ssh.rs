@@ -5,9 +5,7 @@
 //! Destructive commands (adopt, disown, setup-repo) are visually tagged.
 
 use adw::prelude::*;
-use adw::{
-    ActionRow, EntryRow, NavigationPage, NavigationView, PreferencesGroup, Toast, ToastOverlay,
-};
+use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
 use crate::runtime;
@@ -47,11 +45,6 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     // --- Target inputs ---
-    let target_group = PreferencesGroup::builder()
-        .title("Target")
-        .description("Package name and optional arguments shared by the buttons below.")
-        .build();
-
     let pkg_row = EntryRow::builder().title("Package").build();
     if let Some(pkg) = state.borrow().package.as_ref() {
         pkg_row.set_text(&pkg.id);
@@ -59,53 +52,66 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     let args_row = EntryRow::builder()
         .title("Extra args (reason / usernames / keywords)")
         .build();
-    target_group.add(&pkg_row);
-    target_group.add(&args_row);
-    content.append(&target_group);
+    content.append(&ui::collapsible_preferences_section(
+        "Target",
+        Some("Package name and optional arguments shared by the buttons below."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&pkg_row);
+            exp.add_row(&args_row);
+        },
+    ));
 
     // --- Command groups ---
-    let account_group = PreferencesGroup::builder()
-        .title("Account")
-        .description("Read-only commands that ignore the package field.")
-        .build();
-    let voting_group = PreferencesGroup::builder()
-        .title("Voting & notifications")
-        .description("Affect only your relationship to the package.")
-        .build();
-    let maintenance_group = PreferencesGroup::builder()
-        .title("Maintenance")
-        .description("Change ownership or create a new AUR repo. Destructive.")
-        .build();
-    let metadata_group = PreferencesGroup::builder()
-        .title("Package metadata")
-        .description("Replace the co-maintainer list or keyword set.")
-        .build();
+    let (account_list, account_exp) = ui::collapsible_preferences_section_with_expander(
+        "Account",
+        Some("Read-only commands that ignore the package field."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
+    let (voting_list, voting_exp) = ui::collapsible_preferences_section_with_expander(
+        "Voting & notifications",
+        Some("Affect only your relationship to the package."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
+    let (maintenance_list, maintenance_exp) = ui::collapsible_preferences_section_with_expander(
+        "Maintenance",
+        Some("Change ownership or create a new AUR repo. Destructive."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
+    let (metadata_list, metadata_exp) = ui::collapsible_preferences_section_with_expander(
+        "Package metadata",
+        Some("Replace the co-maintainer list or keyword set."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
 
-    let log = LogView::new();
+    let log = LogView::new(
+        "SSH command log",
+        "Lines returned by aur@aur.archlinux.org stream here for each command you run.",
+    );
 
     for cmd in AurSshCommand::ALL {
         let row = render_command_row(cmd, state, &pkg_row, &args_row, &log, &toasts);
         match cmd {
-            AurSshCommand::Help | AurSshCommand::ListRepos => account_group.add(&row),
+            AurSshCommand::Help | AurSshCommand::ListRepos => account_exp.add_row(&row),
             AurSshCommand::Vote
             | AurSshCommand::Unvote
             | AurSshCommand::Flag
             | AurSshCommand::Unflag
             | AurSshCommand::Notify
-            | AurSshCommand::Unnotify => voting_group.add(&row),
+            | AurSshCommand::Unnotify => voting_exp.add_row(&row),
             AurSshCommand::Adopt | AurSshCommand::Disown | AurSshCommand::SetupRepo => {
-                maintenance_group.add(&row)
+                maintenance_exp.add_row(&row)
             }
             AurSshCommand::SetComaintainers | AurSshCommand::SetKeywords => {
-                metadata_group.add(&row)
+                metadata_exp.add_row(&row)
             }
         }
     }
 
-    content.append(&account_group);
-    content.append(&voting_group);
-    content.append(&maintenance_group);
-    content.append(&metadata_group);
+    content.append(&account_list);
+    content.append(&voting_list);
+    content.append(&maintenance_list);
+    content.append(&metadata_list);
     content.append(log.widget());
 
     toasts.set_child(Some(&content));

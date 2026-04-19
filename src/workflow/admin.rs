@@ -2,21 +2,42 @@
 //!
 //! These are the cross-cutting "lifecycle" actions — registering a brand-new
 //! AUR repo, importing an existing one, checking upstream for updates, and
-//! archiving a package. For now most of them are **placeholders** that return
-//! [`AdminError::NotImplemented`]; each function documents the intended
-//! expansion so the UI already has stable call sites.
+//! archiving a package. Most helpers beyond **register** are still placeholders
+//! that return [`AdminError::NotImplemented`]; each function documents the
+//! intended expansion so the UI already has stable call sites.
 //!
-//! The UI layer renders placeholder toasts when an operation is not yet
-//! implemented, so the wizard flow remains usable out of the box.
+//! Register follows a **clone-first** model aligned with the Arch wiki: clone
+//! `ssh://aur@aur.archlinux.org/<pkgbase>.git` into `<work_dir>/aur/<pkgbase>`
+//! (see [`crate::workflow::aur_git::ensure_clone`]). The wiki also documents
+//! an `git init` + `git remote add` + `fetch` path for manual workflows — this
+//! app does not implement that second path.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use async_channel::Sender;
 use thiserror::Error;
 use tokio::process::Command;
 
+use super::aur_git;
+use super::build::{self as build_wf, LogLine};
 use super::package::PackageDef;
+use super::pkgbase::{self, PkgbaseNsError};
+use super::privilege;
 use super::sync;
+use super::validate;
+
+/// How [`register_on_aur`] should behave when `origin/master` already has commits
+/// (for example a previously deleted AUR package whose Git history was kept).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RegisterRemoteHistoryMode {
+    /// Stop after showing a short `git log` — the maintainer must confirm recovery
+    /// (checkbox in the Register wizard) before retrying.
+    #[default]
+    StrictEmptyRemoteOnly,
+    /// Proceed with fetch, staging, commit, and push on top of existing history.
+    AllowExistingRemoteHistory,
+}
 
 /// Typed outcome of a lifecycle call.
 #[derive(Debug, Error)]
@@ -25,6 +46,27 @@ pub enum AdminError {
     /// short label suitable for end-user messages.
     #[error("not implemented yet: {0}")]
     NotImplemented(&'static str),
+    /// Pkgbase matches an official sync-database package — cannot publish this name to the AUR.
+    #[error("This pkgbase matches an official repository package. Pick another name for the AUR.")]
+    OfficialRepoPkgbaseCollision,
+    /// Pkgbase already exists on the AUR — use Publish / adoption, not greenfield Register.
+    #[error(
+        "This pkgbase already exists on the AUR. Use Publish to update an existing clone, not “Register new AUR package”."
+    )]
+    AurPkgbaseAlreadyExists,
+    #[error("could not query official repositories with pacman: {0}")]
+    PacmanNamespace(String),
+    #[error("makepkg validation must not run as root — run the app as a normal user.")]
+    RunningAsRoot,
+    #[error(
+        "The AUR Git remote already has commits on master. Review the log above, then enable “Allow existing remote Git history” in the Register wizard if you intend to continue, or pick another pkgbase."
+    )]
+    RemoteHasGitHistory,
+    #[error("{0}")]
+    RegisterPrecheck(&'static str),
+    /// Required-tier validation outcome was not all [`validate::CheckOutcome::Pass`].
+    #[error("validation failed (required checks must pass): {0}")]
+    ValidationRequiredFailed(String),
     /// Any other runtime failure (IO, subprocess, parse).
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -44,20 +86,299 @@ pub enum UpdateStatus {
     Unknown,
 }
 
-/// Placeholder. **Intended flow** when implemented:
+/// What: First-time publication of a **new** pkgbase to the AUR via SSH Git.
 ///
-/// 1. `git init` inside `<work_dir>/aur/<pkg.id>` if missing.
-/// 2. Copy the current `PKGBUILD` and regenerate `.SRCINFO`.
-/// 3. `git remote add origin ssh://aur@aur.archlinux.org/<pkg.id>.git`
-///    (only if no `origin` exists yet).
-/// 4. `git add PKGBUILD .SRCINFO && git commit -m "Initial import"`.
-/// 5. `git push -u origin master`.
+/// Inputs:
+/// - `work_dir`: configured maintainer work directory.
+/// - `pkg`: wizard-built [`PackageDef`] (pkgbase in `pkg.id`).
+/// - `events`: streamed [`LogLine`]s for validate, `makepkg --printsrcinfo`, and git.
+/// - `remote_history`: [`RegisterRemoteHistoryMode::StrictEmptyRemoteOnly`] stops when
+///   `origin/master` already has commits; [`RegisterRemoteHistoryMode::AllowExistingRemoteHistory`]
+///   continues after `git fetch`.
 ///
-/// The AUR creates the repo on first push, so this is the canonical
-/// first-time registration path. It is intentionally gated behind a
-/// placeholder because a bad push can clobber an existing upstream.
-pub async fn register_on_aur(_work_dir: &Path, _pkg: &PackageDef) -> Result<(), AdminError> {
-    Err(AdminError::NotImplemented("Register new AUR package"))
+/// Output:
+/// - `Ok(())` when the push completes (or there was nothing to commit, which is unusual).
+///
+/// Details:
+/// - Runs [`pkgbase::check_pkgbase_publish_namespace`] before heavy work; calls
+///   [`validate::run_all`] then [`build_wf::write_srcinfo`] before cloning; stages
+///   with [`aur_git::stage_files`] and pushes with [`aur_git::commit_and_push`].
+pub async fn register_on_aur(
+    work_dir: &Path,
+    pkg: &PackageDef,
+    events: &Sender<LogLine>,
+    remote_history: RegisterRemoteHistoryMode,
+) -> Result<(), AdminError> {
+    register_precheck_ids(pkg)?;
+    register_namespace_gate(pkg).await?;
+    register_refuse_root(events).await?;
+    let build_dir = register_resolve_build_dir(work_dir, pkg)?;
+    register_ensure_pkgbuild(&build_dir)?;
+    register_run_validate(&build_dir, events).await?;
+    build_wf::write_srcinfo(&build_dir, events)
+        .await
+        .map_err(AdminError::Other)?;
+    let ssh_url = pkg.aur_ssh_url();
+    register_ls_remote_preview(&ssh_url, events).await?;
+    let clone_dir = aur_git::ensure_clone(work_dir, &pkg.id, &ssh_url, events)
+        .await
+        .map_err(AdminError::Other)?;
+    register_handle_remote_history(&clone_dir, events, remote_history, &ssh_url).await?;
+    register_require_master_branch(&clone_dir, events).await?;
+    aur_git::stage_files(&build_dir, &clone_dir)
+        .await
+        .map_err(AdminError::Other)?;
+    aur_git::commit_and_push(&clone_dir, "Initial import", events)
+        .await
+        .map_err(AdminError::Other)?;
+    Ok(())
+}
+
+fn register_precheck_ids(pkg: &PackageDef) -> Result<(), AdminError> {
+    pkgbase::validate_aur_pkgbase_id(&pkg.id).map_err(|e| AdminError::Other(anyhow::anyhow!(e)))?;
+    Ok(())
+}
+
+async fn register_namespace_gate(pkg: &PackageDef) -> Result<(), AdminError> {
+    let ns = check_pkgbase_for_register(pkg.id.trim()).await?;
+    if ns.official_repo_hit {
+        return Err(AdminError::OfficialRepoPkgbaseCollision);
+    }
+    if ns.aur_pkgbase_hit {
+        return Err(AdminError::AurPkgbaseAlreadyExists);
+    }
+    Ok(())
+}
+
+async fn check_pkgbase_for_register(id: &str) -> Result<pkgbase::PkgbasePublishNs, AdminError> {
+    pkgbase::check_pkgbase_publish_namespace(id)
+        .await
+        .map_err(map_pkgbase_ns_err)
+}
+
+fn map_pkgbase_ns_err(e: PkgbaseNsError) -> AdminError {
+    match e {
+        PkgbaseNsError::Pacman(msg) => AdminError::PacmanNamespace(msg),
+        PkgbaseNsError::Aur(a) => AdminError::Other(a.into()),
+    }
+}
+
+async fn register_refuse_root(events: &Sender<LogLine>) -> Result<(), AdminError> {
+    if privilege::nix_is_root() {
+        let _ = events
+            .send(LogLine::Info(
+                "Refusing register: makepkg must not run as root.".into(),
+            ))
+            .await;
+        return Err(AdminError::RunningAsRoot);
+    }
+    Ok(())
+}
+
+fn register_resolve_build_dir(work_dir: &Path, pkg: &PackageDef) -> Result<PathBuf, AdminError> {
+    sync::package_dir(Some(work_dir), pkg).ok_or_else(|| {
+        AdminError::RegisterPrecheck(
+            "Set a working directory and Sync destination (or package folder) before registering.",
+        )
+    })
+}
+
+async fn register_require_master_branch(
+    clone_dir: &Path,
+    events: &Sender<LogLine>,
+) -> Result<(), AdminError> {
+    let output = Command::new("git")
+        .arg("branch")
+        .arg("--show-current")
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AdminError::Other(e.into()))?;
+    if !output.status.success() {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "git branch --show-current failed: {}",
+            output.status
+        )));
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name == "master" {
+        return Ok(());
+    }
+    let _ = events
+        .send(LogLine::Info(format!(
+            "Refusing push: current branch is {name:?}, but the AUR requires master."
+        )))
+        .await;
+    Err(AdminError::Other(anyhow::anyhow!(
+        "Switch the clone at {} to master (e.g. git branch -M master) before pushing.",
+        clone_dir.display()
+    )))
+}
+
+fn register_ensure_pkgbuild(build_dir: &Path) -> Result<(), AdminError> {
+    let pkgbuild = build_dir.join("PKGBUILD");
+    if !pkgbuild.is_file() {
+        return Err(AdminError::RegisterPrecheck(
+            "PKGBUILD is missing in the package directory — add or sync it before registering.",
+        ));
+    }
+    Ok(())
+}
+
+async fn register_run_validate(
+    build_dir: &Path,
+    events: &Sender<LogLine>,
+) -> Result<(), AdminError> {
+    let reports = validate::run_all(build_dir, events).await;
+    if validate::required_tier_all_pass(&reports) {
+        return Ok(());
+    }
+    let summary = summarize_required_failures(&reports);
+    Err(AdminError::ValidationRequiredFailed(summary))
+}
+
+fn summarize_required_failures(reports: &[validate::CheckReport]) -> String {
+    let mut parts: Vec<String> = reports
+        .iter()
+        .filter(|r| {
+            r.id.tier() == validate::CheckTier::Required
+                && r.outcome != validate::CheckOutcome::Pass
+        })
+        .map(|r| format!("{} — {}", r.id.title(), r.summary))
+        .collect();
+    if parts.is_empty() {
+        parts.push("required tier incomplete (internal)".into());
+    }
+    parts.join("; ")
+}
+
+async fn register_ls_remote_preview(url: &str, events: &Sender<LogLine>) -> Result<(), AdminError> {
+    match aur_git::ls_remote_has_any_ref(url, events).await {
+        Ok(true) => {
+            let _ = events
+                .send(LogLine::Info(
+                    "git ls-remote: remote advertised at least one ref (history may exist).".into(),
+                ))
+                .await;
+        }
+        Ok(false) => {
+            let _ = events
+                .send(LogLine::Info(
+                    "git ls-remote: no refs yet (empty remote is normal for a brand-new pkgbase)."
+                        .into(),
+                ))
+                .await;
+        }
+        Err(e) => {
+            let _ = events
+                .send(LogLine::Stderr(format!(
+                    "git ls-remote failed (continuing): {e}"
+                )))
+                .await;
+        }
+    }
+    Ok(())
+}
+
+async fn register_handle_remote_history(
+    clone_dir: &Path,
+    events: &Sender<LogLine>,
+    remote_history: RegisterRemoteHistoryMode,
+    ssh_url: &str,
+) -> Result<(), AdminError> {
+    if !aur_git::origin_master_resolves(clone_dir)
+        .await
+        .map_err(AdminError::Other)?
+    {
+        return Ok(());
+    }
+    let count = origin_master_commit_count(clone_dir)
+        .await
+        .map_err(AdminError::Other)?;
+    if count == 0 {
+        return Ok(());
+    }
+    let _ = events
+        .send(LogLine::Info(format!(
+            "origin/master has {count} commit(s) — this is not an empty AUR Git remote."
+        )))
+        .await;
+    aur_git::log_origin_master_oneline(clone_dir, 25, events)
+        .await
+        .map_err(AdminError::Other)?;
+    match remote_history {
+        RegisterRemoteHistoryMode::StrictEmptyRemoteOnly => Err(AdminError::RemoteHasGitHistory),
+        RegisterRemoteHistoryMode::AllowExistingRemoteHistory => {
+            let _ = events
+                .send(LogLine::Info(
+                    "Continuing on existing remote history (wiki-aligned recovery path).".into(),
+                ))
+                .await;
+            register_verify_origin_remote(clone_dir, ssh_url).await?;
+            aur_git::fetch_origin(clone_dir, events)
+                .await
+                .map_err(AdminError::Other)?;
+            Ok(())
+        }
+    }
+}
+
+async fn origin_master_commit_count(clone_dir: &Path) -> anyhow::Result<u64> {
+    let output = Command::new("git")
+        .arg("rev-list")
+        .arg("--count")
+        .arg("origin/master")
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git rev-list --count origin/master exited {}",
+            output.status
+        );
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let n = text
+        .trim()
+        .parse::<u64>()
+        .map_err(|e| anyhow::anyhow!("parse rev-list count: {e}"))?;
+    Ok(n)
+}
+
+async fn register_verify_origin_remote(
+    clone_dir: &Path,
+    expected_ssh_url: &str,
+) -> Result<(), AdminError> {
+    let output = Command::new("git")
+        .arg("remote")
+        .arg("get-url")
+        .arg("origin")
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AdminError::Other(e.into()))?;
+    if !output.status.success() {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "git remote get-url origin failed: {}",
+            output.status
+        )));
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if url != expected_ssh_url {
+        return Err(AdminError::Other(anyhow::anyhow!(
+            "origin URL mismatch: expected {expected_ssh_url}, got {url}"
+        )));
+    }
+    Ok(())
 }
 
 /// Placeholder. **Intended flow** when implemented:

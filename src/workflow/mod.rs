@@ -8,6 +8,7 @@ pub mod pkgbase;
 pub mod pkgbuild_diff;
 pub mod pkgbuild_edit;
 pub mod preflight;
+pub mod privilege;
 pub mod registry;
 pub mod ssh_setup;
 pub mod sync;

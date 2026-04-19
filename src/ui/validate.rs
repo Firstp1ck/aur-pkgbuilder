@@ -5,12 +5,12 @@
 //! `shellcheck`, and `namcap` — with a shared streaming log and per-row
 //! status icons.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, ExpanderRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -28,6 +28,8 @@ struct RowHandles {
     status_icon: Image,
     run_btn: Button,
     summary: Label,
+    /// Latest outcome for aggregate header icons (required tier only uses this today).
+    last_outcome: Cell<Option<CheckOutcome>>,
 }
 
 type RowMap = Rc<RefCell<HashMap<CheckId, RowHandles>>>;
@@ -41,6 +43,7 @@ fn spawn_required_tier_streaming(
     toasts: &ToastOverlay,
     summary_status: &Label,
     pkg: &PackageDef,
+    required_header: &Rc<(ExpanderRow, Image)>,
 ) {
     let work = state.borrow().config.work_dir.clone();
     let pkg = pkg.clone();
@@ -49,17 +52,19 @@ fn spawn_required_tier_streaming(
     };
     summary_status.set_text("running required checks…");
     mark_tier_running(rows, CheckTier::Required);
+    refresh_required_section_icon(rows, required_header);
 
     let rows_done = rows.clone();
     let log_cb = log.clone();
     let summary_status = summary_status.clone();
     let toasts = toasts.clone();
+    let hdr = required_header.clone();
     runtime::spawn_streaming(
         move |tx| async move { validate::run_tier(CheckTier::Required, &dir, &tx).await },
         move |line| log_cb.append(&line),
         move |reports| {
             for rep in &reports {
-                apply_report(&rows_done, rep);
+                apply_report(&rows_done, rep, &hdr);
             }
             summary_status.set_text(&summarize(&reports));
             if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
@@ -104,38 +109,70 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
-    let log = LogView::new();
+    let log = LogView::new(
+        "Validation log",
+        "ShellCheck, namcap, makepkg --noextract, and extended build output stream here.",
+    );
     let rows: RowMap = Rc::new(RefCell::new(HashMap::new()));
 
-    let required = PreferencesGroup::builder()
-        .title("Required")
-        .description("Failures here block a successful makepkg.")
+    let (required_list, required_exp) = ui::collapsible_preferences_section_with_expander(
+        "Required",
+        Some("Failures here block a successful makepkg."),
+        false,
+    );
+    let required_status_icon = Image::builder().build();
+    required_status_icon.set_pixel_size(20);
+    required_status_icon.set_visible(false);
+    required_exp.add_suffix(&required_status_icon);
+    let required_section_hdr = Rc::new((required_exp.clone(), required_status_icon.clone()));
+    let (optional_list, optional_exp) = ui::collapsible_preferences_section_with_expander(
+        "Optional lints",
+        Some("Quality signals. Missing tools are skipped with an install hint."),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
+    let optional_run_btn = Button::builder()
+        .label("Run Lint checks")
+        .valign(Align::Center)
+        .css_classes(vec!["pill"])
         .build();
-    let optional = PreferencesGroup::builder()
-        .title("Optional lints")
-        .description("Quality signals. Missing tools are skipped with an install hint.")
-        .build();
-    let extended = PreferencesGroup::builder()
-        .title("Extended (fakeroot build)")
-        .description(
+    optional_exp.add_suffix(&optional_run_btn);
+
+    let (extended_list, extended_exp) = ui::collapsible_preferences_section_with_expander(
+        "Extended (fakeroot build)",
+        Some(
             "Actually builds the package using fakeroot and lints the artefact. \
              Slow — can take several minutes — and produces a real .pkg.tar.* file in \
              the working directory.",
-        )
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+    );
+    let extended_section_run_btn = Button::builder()
+        .label("Run extended build")
+        .tooltip_text("Builds the package in fakeroot. Slow.")
+        .valign(Align::Center)
+        .css_classes(vec!["pill"])
         .build();
+    extended_exp.add_suffix(&extended_section_run_btn);
 
     for id in CheckId::ALL {
-        let (row, handles) = render_check_row(id, state, &pkg, &log, &rows, &toasts);
+        let (row, handles) =
+            render_check_row(id, state, &pkg, &log, &rows, &toasts, &required_section_hdr);
         rows.borrow_mut().insert(id, handles);
         match id.tier() {
-            CheckTier::Required => required.add(&row),
-            CheckTier::Optional => optional.add(&row),
-            CheckTier::Extended => extended.add(&row),
+            CheckTier::Required => required_exp.add_row(&row),
+            CheckTier::Optional => optional_exp.add_row(&row),
+            CheckTier::Extended => extended_exp.add_row(&row),
         }
     }
-    content.append(&required);
-    content.append(&optional);
-    content.append(&extended);
+    let rows_for_required_icon = rows.clone();
+    ui::connect_expander_collapsed_aggregate_refresh(
+        &required_exp,
+        &required_status_icon,
+        Rc::new(move || required_tier_aggregate(&rows_for_required_icon)),
+    );
+    content.append(&required_list);
+    content.append(&optional_list);
+    content.append(&extended_list);
 
     // --- Run all + Continue ---
     let summary_status = Label::builder()
@@ -178,6 +215,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         let summary_status = summary_status.clone();
         let pkg = pkg.clone();
+        let required_hdr = required_section_hdr.clone();
         run_all_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
@@ -190,17 +228,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             summary_status.set_text("running fast checks…");
             mark_tier_running(&rows, CheckTier::Required);
             mark_tier_running(&rows, CheckTier::Optional);
+            refresh_required_section_icon(&rows, &required_hdr);
 
             let rows_done = rows.clone();
             let log_cb = log.clone();
             let summary_status = summary_status.clone();
             let toasts = toasts.clone();
+            let hdr = required_hdr.clone();
             runtime::spawn_streaming(
                 move |tx| async move { validate::run_all(&dir, &tx).await },
                 move |line| log_cb.append(&line),
                 move |reports| {
                     for rep in &reports {
-                        apply_report(&rows_done, rep);
+                        apply_report(&rows_done, rep, &hdr);
                     }
                     summary_status.set_text(&summarize(&reports));
                     if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
@@ -213,9 +253,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
 
-    spawn_required_tier_streaming(state, &rows, &log, &toasts, &summary_status, &pkg);
-
-    // --- Run extended (fakeroot build + package lint) ---
+    // --- Run optional tier (shellcheck + namcap PKGBUILD) from section header ---
     {
         let state = state.clone();
         let rows = rows.clone();
@@ -223,8 +261,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         let summary_status = summary_status.clone();
         let pkg = pkg.clone();
-        let run_extended_inner = run_extended_btn.clone();
-        run_extended_btn.connect_clicked(move |_| {
+        let required_hdr = required_section_hdr.clone();
+        let optional_run_inner = optional_run_btn.clone();
+        optional_run_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
                 toasts.add_toast(Toast::new(
@@ -233,30 +272,91 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 return;
             };
             log.clear();
-            summary_status.set_text("running extended checks — this may take a while…");
-            mark_tier_running(&rows, CheckTier::Extended);
-            run_extended_inner.set_sensitive(false);
+            summary_status.set_text("running optional lint checks…");
+            mark_tier_running(&rows, CheckTier::Optional);
+            optional_run_inner.set_sensitive(false);
 
             let rows_done = rows.clone();
             let log_cb = log.clone();
             let summary_status = summary_status.clone();
             let toasts = toasts.clone();
-            let run_extended_done = run_extended_inner.clone();
+            let optional_run_done = optional_run_inner.clone();
+            let hdr = required_hdr.clone();
             runtime::spawn_streaming(
-                move |tx| async move { validate::run_extended(&dir, &tx).await },
+                move |tx| async move { validate::run_tier(CheckTier::Optional, &dir, &tx).await },
                 move |line| log_cb.append(&line),
                 move |reports| {
-                    run_extended_done.set_sensitive(true);
+                    optional_run_done.set_sensitive(true);
                     for rep in &reports {
-                        apply_report(&rows_done, rep);
+                        apply_report(&rows_done, rep, &hdr);
                     }
                     summary_status.set_text(&summarize(&reports));
                     if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                        toasts.add_toast(Toast::new("Fakeroot build failed"));
+                        toasts.add_toast(Toast::new("Some optional lint checks failed"));
                     } else {
-                        toasts.add_toast(Toast::new("Extended checks complete"));
+                        toasts.add_toast(Toast::new("Optional lint checks complete"));
                     }
                 },
+            );
+        });
+    }
+
+    spawn_required_tier_streaming(
+        state,
+        &rows,
+        &log,
+        &toasts,
+        &summary_status,
+        &pkg,
+        &required_section_hdr,
+    );
+
+    // --- Run extended (fakeroot build + package lint) — toolbar + section header ---
+    {
+        let state_top = state.clone();
+        let rows_top = rows.clone();
+        let log_top = log.clone();
+        let toasts_top = toasts.clone();
+        let summary_top = summary_status.clone();
+        let pkg_top = pkg.clone();
+        let required_top = required_section_hdr.clone();
+        let run_ext_top = run_extended_btn.clone();
+        let run_sec_top = extended_section_run_btn.clone();
+        run_extended_btn.connect_clicked(move |_| {
+            spawn_extended_validation_run(
+                ExtendedValidationRunCtx {
+                    state: state_top.clone(),
+                    rows: rows_top.clone(),
+                    log: log_top.clone(),
+                    toasts: toasts_top.clone(),
+                    summary_status: summary_top.clone(),
+                    pkg: pkg_top.clone(),
+                    required_hdr: required_top.clone(),
+                },
+                &[run_ext_top.clone(), run_sec_top.clone()],
+            );
+        });
+        let state_sec = state.clone();
+        let rows_sec = rows.clone();
+        let log_sec = log.clone();
+        let toasts_sec = toasts.clone();
+        let summary_sec = summary_status.clone();
+        let pkg_sec = pkg.clone();
+        let required_sec = required_section_hdr.clone();
+        let run_ext_btn = run_extended_btn.clone();
+        let run_sec_btn = extended_section_run_btn.clone();
+        extended_section_run_btn.connect_clicked(move |_| {
+            spawn_extended_validation_run(
+                ExtendedValidationRunCtx {
+                    state: state_sec.clone(),
+                    rows: rows_sec.clone(),
+                    log: log_sec.clone(),
+                    toasts: toasts_sec.clone(),
+                    summary_status: summary_sec.clone(),
+                    pkg: pkg_sec.clone(),
+                    required_hdr: required_sec.clone(),
+                },
+                &[run_ext_btn.clone(), run_sec_btn.clone()],
             );
         });
     }
@@ -273,6 +373,62 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     ui::home::wrap_page("Validate", &toasts)
 }
 
+/// Owned GTK / app handles passed into [`spawn_extended_validation_run`].
+///
+/// Details: Cloned per click because `connect_clicked` handlers are `Fn` (may run more than once).
+struct ExtendedValidationRunCtx {
+    state: AppStateRef,
+    rows: RowMap,
+    log: LogView,
+    toasts: ToastOverlay,
+    summary_status: Label,
+    pkg: PackageDef,
+    required_hdr: Rc<(ExpanderRow, Image)>,
+}
+
+/// Starts the extended-tier validation stream and disables `busy_buttons` until completion.
+fn spawn_extended_validation_run(ctx: ExtendedValidationRunCtx, busy_buttons: &[Button]) {
+    let work = ctx.state.borrow().config.work_dir.clone();
+    let Some(dir) = sync::package_dir(work.as_deref(), &ctx.pkg) else {
+        ctx.toasts.add_toast(Toast::new(
+            "Set a working directory on Connection or pick a destination folder on Sync.",
+        ));
+        return;
+    };
+    ctx.log.clear();
+    ctx.summary_status
+        .set_text("running extended checks — this may take a while…");
+    mark_tier_running(&ctx.rows, CheckTier::Extended);
+    for b in busy_buttons {
+        b.set_sensitive(false);
+    }
+
+    let rows_done = ctx.rows.clone();
+    let log_cb = ctx.log.clone();
+    let summary_status = ctx.summary_status.clone();
+    let toasts = ctx.toasts.clone();
+    let restores = busy_buttons.to_vec();
+    let hdr = ctx.required_hdr.clone();
+    runtime::spawn_streaming(
+        move |tx| async move { validate::run_extended(&dir, &tx).await },
+        move |line| log_cb.append(&line),
+        move |reports| {
+            for b in &restores {
+                b.set_sensitive(true);
+            }
+            for rep in &reports {
+                apply_report(&rows_done, rep, &hdr);
+            }
+            summary_status.set_text(&summarize(&reports));
+            if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
+                toasts.add_toast(Toast::new("Fakeroot build failed"));
+            } else {
+                toasts.add_toast(Toast::new("Extended checks complete"));
+            }
+        },
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Row rendering
 // ---------------------------------------------------------------------------
@@ -284,6 +440,7 @@ fn render_check_row(
     log: &LogView,
     rows: &RowMap,
     toasts: &ToastOverlay,
+    required_header: &Rc<(ExpanderRow, Image)>,
 ) -> (ActionRow, RowHandles) {
     let row = ActionRow::builder()
         .title(id.title())
@@ -317,6 +474,7 @@ fn render_check_row(
         let log = log.clone();
         let pkg = pkg.clone();
         let toasts = toasts.clone();
+        let hdr = required_header.clone();
         run_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
@@ -328,10 +486,11 @@ fn render_check_row(
             mark_running(&rows, id);
             let rows_done = rows.clone();
             let log_cb = log.clone();
+            let hdr_report = hdr.clone();
             runtime::spawn_streaming(
                 move |tx| async move { validate::run_check(id, &dir, &tx).await },
                 move |line| log_cb.append(&line),
-                move |report| apply_report(&rows_done, &report),
+                move |report| apply_report(&rows_done, &report, &hdr_report),
             );
         });
     }
@@ -341,12 +500,14 @@ fn render_check_row(
         status_icon,
         run_btn,
         summary,
+        last_outcome: Cell::new(None),
     };
     (row, handles)
 }
 
 fn mark_running(rows: &RowMap, id: CheckId) {
-    if let Some(h) = rows.borrow().get(&id) {
+    if let Some(h) = rows.borrow_mut().get_mut(&id) {
+        h.last_outcome.set(None);
         h.spinner.start();
         h.run_btn.set_sensitive(false);
         h.status_icon
@@ -364,34 +525,58 @@ fn mark_tier_running(rows: &RowMap, tier: CheckTier) {
     }
 }
 
-fn apply_report(rows: &RowMap, report: &CheckReport) {
-    let Some(h) = rows.borrow().get(&report.id).map(clone_handles) else {
-        return;
-    };
-    h.spinner.stop();
-    h.run_btn.set_sensitive(true);
-
-    let (icon, classes) = icon_for(report.outcome);
-    h.status_icon.set_icon_name(Some(icon));
-    set_status_classes(&h.status_icon, classes);
-
-    let mut text = report.summary.clone();
-    if report.outcome == CheckOutcome::Skipped
-        && let Some(hint) = report.id.install_hint()
+fn apply_report(rows: &RowMap, report: &CheckReport, required_header: &Rc<(ExpanderRow, Image)>) {
+    let refresh_required = report.id.tier() == CheckTier::Required;
     {
-        text.push_str(" — ");
-        text.push_str(hint);
+        let mut map = rows.borrow_mut();
+        let Some(h) = map.get_mut(&report.id) else {
+            return;
+        };
+        h.spinner.stop();
+        h.run_btn.set_sensitive(true);
+
+        let (icon, classes) = icon_for(report.outcome);
+        h.status_icon.set_icon_name(Some(icon));
+        set_status_classes(&h.status_icon, classes);
+
+        let mut text = report.summary.clone();
+        if report.outcome == CheckOutcome::Skipped
+            && let Some(hint) = report.id.install_hint()
+        {
+            text.push_str(" — ");
+            text.push_str(hint);
+        }
+        h.summary.set_text(&text);
+        h.last_outcome.set(Some(report.outcome));
     }
-    h.summary.set_text(&text);
+    if refresh_required {
+        refresh_required_section_icon(rows, required_header);
+    }
 }
 
-fn clone_handles(src: &RowHandles) -> RowHandles {
-    RowHandles {
-        spinner: src.spinner.clone(),
-        status_icon: src.status_icon.clone(),
-        run_btn: src.run_btn.clone(),
-        summary: src.summary.clone(),
+/// What: Computes whether every required-tier check has finished and passed.
+fn required_tier_aggregate(rows: &RowMap) -> Option<bool> {
+    let map = rows.borrow();
+    for id in CheckId::ALL {
+        if id.tier() != CheckTier::Required {
+            continue;
+        }
+        let h = map.get(&id)?;
+        let outcome = h.last_outcome.get()?;
+        if outcome != CheckOutcome::Pass {
+            return Some(false);
+        }
     }
+    Some(true)
+}
+
+/// What: Refreshes the Required expander (collapsed when the whole tier passes; opened on any miss).
+fn refresh_required_section_icon(rows: &RowMap, required_header: &Rc<(ExpanderRow, Image)>) {
+    let agg = required_tier_aggregate(rows);
+    if let Some(all_pass) = agg {
+        required_header.0.set_expanded(!all_pass);
+    }
+    ui::set_collapsed_aggregate_icon(&required_header.1, &required_header.0, agg);
 }
 
 fn icon_for(outcome: CheckOutcome) -> (&'static str, &'static [&'static str]) {

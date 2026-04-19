@@ -82,7 +82,35 @@ fn first_devtools_on_path(paths: &[Option<PathBuf>]) -> Option<(&'static str, Pa
     None
 }
 
-/// What: Lists installed packages that belong to the `base-devel` group via `pacman -Qg`.
+/// What: Detects the `base-devel` **metapackage** via `pacman -Q base-devel`.
+///
+/// Inputs: none.
+///
+/// Output:
+/// - `Some(line)` for the first non-empty stdout line (typically `base-devel <ver>-<rel>`), or
+///   [`None`] when the package is not installed or `pacman` could not be run.
+///
+/// Details:
+/// - Arch ships `base-devel` as a real `pkgname` (depends pull the toolchain). This probe runs
+///   **before** [`pacman_qg_base_devel`] so modern installs satisfy without a pacman “group”.
+async fn pacman_q_base_devel() -> Option<String> {
+    let output = Command::new("pacman")
+        .arg("-Q")
+        .arg("base-devel")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    nonempty_trimmed_owned_lines(&stdout).into_iter().next()
+}
+
+/// What: Lists installed packages that belong to the `base-devel` **group** via `pacman -Qg`.
 ///
 /// Inputs: none.
 ///
@@ -91,6 +119,8 @@ fn first_devtools_on_path(paths: &[Option<PathBuf>]) -> Option<(&'static str, Pa
 ///
 /// Details:
 /// - Empty `Ok` means no group members are installed (treat as “install base-devel”).
+/// - **Fallback** for older systems where `base-devel` was a group rather than a metapackage; see
+///   [`pacman_q_base_devel`].
 async fn pacman_qg_base_devel() -> Result<Vec<String>, String> {
     let output = Command::new("pacman")
         .arg("-Qg")
@@ -128,7 +158,57 @@ fn nonempty_trimmed_owned_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// What: Probes the `base-devel` **group** via `pacman -Qg` (stronger than a single binary).
+#[derive(Debug)]
+enum BaseDevelProbe {
+    /// `pacman -Q base-devel` returned a version line.
+    Metapackage(String),
+    /// Result of legacy `pacman -Qg base-devel` (installed group members).
+    GroupMembers(Result<Vec<String>, String>),
+}
+
+/// What: Maps a [`BaseDevelProbe`] to a Connection “Recommended environment” [`ToolCheck`].
+///
+/// Inputs:
+/// - `probe`: metapackage line or wrapped `pacman -Qg` outcome.
+///
+/// Output:
+/// - A populated [`ToolCheck`] for the `base-devel` row.
+///
+/// Details:
+/// - Pure helper so [`check_base_devel_group`] stays small and this stays unit-testable.
+fn tool_check_base_devel(probe: BaseDevelProbe) -> ToolCheck {
+    let row = |satisfied_without_binary: bool, detail: Option<String>| ToolCheck {
+        name: "base-devel",
+        purpose: "packaging meta-group on this system",
+        install_hint: "pacman -S --needed base-devel",
+        path: None,
+        resolved_via: None,
+        satisfied_without_binary,
+        detail,
+    };
+    match probe {
+        BaseDevelProbe::Metapackage(line) => row(
+            true,
+            Some(format!("metapackage {line} (pacman -Q base-devel)")),
+        ),
+        BaseDevelProbe::GroupMembers(Ok(members)) if !members.is_empty() => row(
+            true,
+            Some(format!(
+                "{} installed members (pacman -Qg base-devel)",
+                members.len()
+            )),
+        ),
+        BaseDevelProbe::GroupMembers(Ok(_)) => row(
+            false,
+            Some("no installed packages belong to base-devel".to_string()),
+        ),
+        BaseDevelProbe::GroupMembers(Err(e)) => {
+            row(false, Some(format!("could not query pacman ({e})")))
+        }
+    }
+}
+
+/// What: Probes `base-devel` via `pacman -Q` (metapackage), then `pacman -Qg` (legacy group).
 ///
 /// Inputs: none.
 ///
@@ -138,38 +218,12 @@ fn nonempty_trimmed_owned_lines(text: &str) -> Vec<String> {
 /// Details:
 /// - Complements [`check_fakeroot_sentinel`]; if `pacman` is unavailable the row explains why.
 pub async fn check_base_devel_group() -> ToolCheck {
-    match pacman_qg_base_devel().await {
-        Ok(members) if !members.is_empty() => ToolCheck {
-            name: "base-devel",
-            purpose: "packaging meta-group on this system",
-            install_hint: "pacman -S --needed base-devel",
-            path: None,
-            resolved_via: None,
-            satisfied_without_binary: true,
-            detail: Some(format!(
-                "{} installed members (pacman -Qg base-devel)",
-                members.len()
-            )),
-        },
-        Ok(_) => ToolCheck {
-            name: "base-devel",
-            purpose: "packaging meta-group on this system",
-            install_hint: "pacman -S --needed base-devel",
-            path: None,
-            resolved_via: None,
-            satisfied_without_binary: false,
-            detail: Some("no installed packages belong to base-devel".to_string()),
-        },
-        Err(e) => ToolCheck {
-            name: "base-devel",
-            purpose: "packaging meta-group on this system",
-            install_hint: "pacman -S --needed base-devel",
-            path: None,
-            resolved_via: None,
-            satisfied_without_binary: false,
-            detail: Some(format!("could not query pacman ({e})")),
-        },
+    if let Some(line) = pacman_q_base_devel().await
+        && !line.is_empty()
+    {
+        return tool_check_base_devel(BaseDevelProbe::Metapackage(line));
     }
+    tool_check_base_devel(BaseDevelProbe::GroupMembers(pacman_qg_base_devel().await))
 }
 
 /// What: Probes `fakeroot`, a practical signal that `base-devel` is present for `makepkg`.
@@ -367,6 +421,54 @@ pub async fn connection_tab_healthy(ssh_key: Option<PathBuf>) -> bool {
         probe_aur_ssh(ssh_key.as_deref()).await,
         Ok(SshProbe::Authenticated { .. })
     )
+}
+
+#[cfg(test)]
+mod base_devel_tool_check_tests {
+    use super::{BaseDevelProbe, tool_check_base_devel};
+
+    #[test]
+    fn metapackage_satisfies_without_group_query() {
+        let t = tool_check_base_devel(BaseDevelProbe::Metapackage("base-devel 1-2".to_string()));
+        assert!(t.satisfied_without_binary);
+        assert_eq!(
+            t.detail.as_deref(),
+            Some("metapackage base-devel 1-2 (pacman -Q base-devel)")
+        );
+    }
+
+    #[test]
+    fn group_members_non_empty_satisfies() {
+        let t = tool_check_base_devel(BaseDevelProbe::GroupMembers(Ok(vec![
+            "base-devel gcc".to_string(),
+            "base-devel patch".to_string(),
+        ])));
+        assert!(t.satisfied_without_binary);
+        let d = t.detail.expect("detail");
+        assert!(d.contains("2 installed members"));
+        assert!(d.contains("pacman -Qg base-devel"));
+    }
+
+    #[test]
+    fn group_members_empty_not_satisfied() {
+        let t = tool_check_base_devel(BaseDevelProbe::GroupMembers(Ok(vec![])));
+        assert!(!t.satisfied_without_binary);
+        assert_eq!(
+            t.detail.as_deref(),
+            Some("no installed packages belong to base-devel")
+        );
+    }
+
+    #[test]
+    fn group_query_error_surfaces() {
+        let t = tool_check_base_devel(BaseDevelProbe::GroupMembers(Err(
+            "error: group 'base-devel' was not found".to_string(),
+        )));
+        assert!(!t.satisfied_without_binary);
+        let d = t.detail.expect("detail");
+        assert!(d.starts_with("could not query pacman ("));
+        assert!(d.contains("group"));
+    }
 }
 
 #[cfg(test)]

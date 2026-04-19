@@ -1,5 +1,6 @@
 use adw::prelude::*;
-use adw::{ActionRow, Banner, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, Banner, NavigationPage, Toast, ToastOverlay};
+use gtk4::ListBox;
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -64,7 +65,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 }
 
 /// Kind-specific guidance. Not pkg-specific — derived from [`PackageKind`].
-fn kind_hint(pkg: &PackageDef) -> PreferencesGroup {
+fn kind_hint(pkg: &PackageDef) -> ListBox {
     let (title, description) = match pkg.kind {
         PackageKind::Bin => (
             "Binary package",
@@ -82,24 +83,17 @@ fn kind_hint(pkg: &PackageDef) -> PreferencesGroup {
              checksums if you downloaded new sources.",
         ),
     };
-    PreferencesGroup::builder()
-        .title(title)
-        .description(description)
-        .build()
+    ui::collapsible_preferences_section(
+        title,
+        Some(description),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |_| {},
+    )
 }
 
 /// Generic "refresh sha256sums" runner — useful for every kind of package,
 /// so it is shown unconditionally.
-fn checksum_group(
-    state: &AppStateRef,
-    pkg: &PackageDef,
-    toasts: &ToastOverlay,
-) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Checksums")
-        .description("Runs `updpkgsums` against the PKGBUILD in the working directory.")
-        .build();
-
+fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) -> ListBox {
     let row = ActionRow::builder()
         .title("Refresh checksums")
         .subtitle("Safe to skip for git-style packages with empty source arrays.")
@@ -112,15 +106,15 @@ fn checksum_group(
         .build();
     row.add_suffix(&spinner);
     row.add_suffix(&run_btn);
-    group.add(&row);
 
-    let log = LogView::new();
-    group.add(
-        &adw::Bin::builder()
-            .margin_top(8)
-            .child(log.widget())
-            .build(),
+    let log = LogView::new(
+        "updpkgsums log",
+        "Checksum refresh output from updpkgsums is shown below when you run it.",
     );
+    let log_bin = adw::Bin::builder()
+        .margin_top(8)
+        .child(log.widget())
+        .build();
 
     let toasts = toasts.clone();
     let state = state.clone();
@@ -175,5 +169,13 @@ fn checksum_group(
         );
     });
 
-    group
+    ui::collapsible_preferences_section(
+        "Checksums",
+        Some("Runs `updpkgsums` against the PKGBUILD in the working directory."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&row);
+            exp.add_row(&log_bin);
+        },
+    )
 }

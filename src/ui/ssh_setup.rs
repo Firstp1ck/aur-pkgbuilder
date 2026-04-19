@@ -100,15 +100,7 @@ pub fn build(
 // Section: one-click setup
 // ---------------------------------------------------------------------------
 
-fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("One-click setup")
-        .description(
-            "Runs the three steps below in order. Safe to click repeatedly — \
-             existing files are reused rather than overwritten.",
-        )
-        .build();
-
+fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
     let row = ActionRow::builder()
         .title("Set up key + config + known_hosts")
         .subtitle("Creates ~/.ssh/aur, adds a Host block, pins the AUR host key.")
@@ -119,7 +111,6 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGro
         .css_classes(vec!["pill", "suggested-action"])
         .build();
     row.add_suffix(&btn);
-    group.add(&row);
 
     let state = state.clone();
     let toasts = toasts.clone();
@@ -141,7 +132,17 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGro
         );
     });
 
-    group
+    ui::collapsible_preferences_section(
+        "One-click setup",
+        Some(
+            "Runs the three steps below in order. Safe to click repeatedly — \
+             existing files are reused rather than overwritten.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&row);
+        },
+    )
 }
 
 fn apply_full_setup(state: &AppStateRef, toasts: &ToastOverlay, report: FullSetupReport) {
@@ -260,16 +261,7 @@ fn render_key_row(state: &AppStateRef, toasts: &ToastOverlay, key: &SshKey) -> A
 // Section: per-step — create/reuse ~/.ssh/aur
 // ---------------------------------------------------------------------------
 
-fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("AUR key (~/.ssh/aur)")
-        .description(
-            "Reuses the file if it already exists; otherwise generates a new ed25519 key with an \
-             empty passphrase for non-interactive use. For stronger protection, run ssh-keygen \
-             yourself with a passphrase, then select that key with “Use for AUR”.",
-        )
-        .build();
-
+fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) -> ListBox {
     let row = ActionRow::builder()
         .title("Ensure ~/.ssh/aur")
         .subtitle("Never overwrites an existing key.")
@@ -280,7 +272,6 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         .css_classes(vec!["pill"])
         .build();
     row.add_suffix(&btn);
-    group.add(&row);
 
     let agent_row = ActionRow::builder()
         .title("List keys in ssh-agent")
@@ -294,7 +285,6 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         .css_classes(vec!["pill"])
         .build();
     agent_row.add_suffix(&agent_btn);
-    group.add(&agent_row);
 
     {
         let toasts = toasts.clone();
@@ -322,7 +312,6 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
         .css_classes(vec!["pill"])
         .build();
     add_row.add_suffix(&add_btn);
-    group.add(&add_row);
 
     {
         let state = state.clone();
@@ -382,7 +371,20 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
             },
         );
     });
-    group
+    ui::collapsible_preferences_section(
+        "AUR key (~/.ssh/aur)",
+        Some(
+            "Reuses the file if it already exists; otherwise generates a new ed25519 key with an \
+             empty passphrase for non-interactive use. For stronger protection, run ssh-keygen \
+             yourself with a passphrase, then select that key with “Use for AUR”.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&row);
+            exp.add_row(&agent_row);
+            exp.add_row(&add_row);
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -614,19 +616,7 @@ fn show_aur_username_missing_dialog(
     dialog.present(Some(parent));
 }
 
-fn publish_group(
-    state: &AppStateRef,
-    toasts: &ToastOverlay,
-    shell: &MainShell,
-) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Publish to AUR")
-        .description(
-            "Copy your public key into the AUR account page so the server accepts your pushes. \
-             The AUR accepts multiple keys: paste each on its own line in the SSH Public Key field.",
-        )
-        .build();
-
+fn publish_group(state: &AppStateRef, toasts: &ToastOverlay, shell: &MainShell) -> ListBox {
     let copy_row = ActionRow::builder()
         .title("Copy public key to clipboard")
         .subtitle("Uses the key selected above.")
@@ -637,7 +627,6 @@ fn publish_group(
         .css_classes(vec!["pill"])
         .build();
     copy_row.add_suffix(&copy_btn);
-    group.add(&copy_row);
 
     {
         let state = state.clone();
@@ -682,7 +671,6 @@ fn publish_group(
         .css_classes(vec!["pill"])
         .build();
     open_row.add_suffix(&open_btn);
-    group.add(&open_row);
 
     {
         let state = state.clone();
@@ -724,19 +712,25 @@ fn publish_group(
         });
     }
 
-    group
+    ui::collapsible_preferences_section(
+        "Publish to AUR",
+        Some(
+            "Copy your public key into the AUR account page so the server accepts your pushes. \
+             The AUR accepts multiple keys: paste each on its own line in the SSH Public Key field.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&copy_row);
+            exp.add_row(&open_row);
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Section: connectivity
 // ---------------------------------------------------------------------------
 
-fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Connectivity")
-        .description("Client-side tweaks that make SSH to aur.archlinux.org seamless.")
-        .build();
-
+fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
     let trust_row = ActionRow::builder()
         .title("Trust aur.archlinux.org host key")
         .subtitle(
@@ -750,7 +744,6 @@ fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> Preferences
         .css_classes(vec!["pill"])
         .build();
     trust_row.add_suffix(&trust_btn);
-    group.add(&trust_row);
 
     {
         let toasts = toasts.clone();
@@ -791,7 +784,6 @@ fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> Preferences
         .css_classes(vec!["pill"])
         .build();
     config_row.add_suffix(&config_btn);
-    group.add(&config_row);
 
     {
         let state = state.clone();
@@ -830,7 +822,15 @@ fn connectivity_group(state: &AppStateRef, toasts: &ToastOverlay) -> Preferences
         });
     }
 
-    group
+    ui::collapsible_preferences_section(
+        "Connectivity",
+        Some("Client-side tweaks that make SSH to aur.archlinux.org seamless."),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&trust_row);
+            exp.add_row(&config_row);
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------

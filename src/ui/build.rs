@@ -47,7 +47,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     options_row.append(&clean);
     content.append(&options_row);
 
-    let log = LogView::new();
+    let log = LogView::new(
+        "Build log",
+        "Live stdout and stderr from makepkg appear below once you press Build.",
+    );
     content.append(log.widget());
 
     let status = Label::builder().halign(Align::Start).build();
@@ -93,7 +96,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 ));
                 return;
             };
-            if nix_is_root() {
+            if crate::workflow::privilege::nix_is_root() {
                 toasts.add_toast(Toast::new("Refusing to build as root."));
                 return;
             }
@@ -159,22 +162,4 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     toasts.set_child(Some(&content));
     ui::home::wrap_page("Build", &toasts)
-}
-
-#[cfg(unix)]
-fn nix_is_root() -> bool {
-    // SAFETY: getuid is always safe to call.
-    unsafe { libc_getuid() == 0 }
-}
-
-#[cfg(not(unix))]
-fn nix_is_root() -> bool {
-    false
-}
-
-// Tiny FFI shim to avoid pulling in the `libc` crate just for getuid.
-#[cfg(unix)]
-unsafe extern "C" {
-    #[link_name = "getuid"]
-    fn libc_getuid() -> u32;
 }

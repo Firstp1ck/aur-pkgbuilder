@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use adw::{ActionRow, Banner, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, Banner, EntryRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{
     Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, Spinner,
     TextView, WrapMode,
@@ -52,16 +52,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     content.append(&sub);
 
-    let publication_expectations = PreferencesGroup::builder()
-        .title("Publication expectations")
-        .description(
+    content.append(&ui::collapsible_preferences_section(
+        "Publication expectations",
+        Some(
             "The AUR is not moderated before publication: when your push succeeds, \
              the updated sources are public. Asking for review on the Arch forums or \
              mailing lists is encouraged when you are unsure, but it is voluntary and \
              does not block or replace your own checks before you push.",
-        )
-        .build();
-    content.append(&publication_expectations);
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |_exp| {},
+    ));
 
     // SSH must be verified before we can git-clone/push over ssh://aur@…
     let ssh_ready = state.borrow().ssh_ok;
@@ -89,14 +90,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         content.append(&banner);
     }
 
-    let msg_group = PreferencesGroup::builder()
-        .title("Commit message")
-        .description(
-            "Pre-filled from your default template (use {pkg} to insert the package \
-             name). Edit here to change just this commit, or press “Save as default” \
-             to update the template for future commits.",
-        )
-        .build();
     let message_row = EntryRow::builder().title("Commit message").build();
 
     let initial_template = state
@@ -125,9 +118,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     default_hint.add_suffix(&save_default_btn);
     default_hint.add_suffix(&reset_default_btn);
 
-    msg_group.add(&message_row);
-    msg_group.add(&default_hint);
-    content.append(&msg_group);
+    content.append(&ui::collapsible_preferences_section(
+        "Commit message",
+        Some(
+            "Pre-filled from your default template (use {pkg} to insert the package \
+             name). Edit here to change just this commit, or press “Save as default” \
+             to update the template for future commits.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&message_row);
+            exp.add_row(&default_hint);
+        },
+    ));
 
     {
         let state = state.clone();
@@ -231,7 +234,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
     content.append(&diff_scroller);
 
-    let log = LogView::new();
+    let log = LogView::new(
+        "Publish log",
+        "git status, diff, commit, and push transcripts from the actions above appear here.",
+    );
     content.append(log.widget());
 
     {

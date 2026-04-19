@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use adw::{ActionRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use crate::runtime;
@@ -82,24 +82,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
-    let sync_publish_bridge = PreferencesGroup::builder()
-        .title("Sync and Publish")
-        .description(
-            "Publish copies PKGBUILD and .SRCINFO from the destination below into the AUR Git \
-             clone, then commits when you choose. A successful push updates the public AUR \
-             immediately. On a brand-new pkgbase, the first clone may warn that the repository \
-             is empty—that is expected.",
-        )
-        .build();
-    content.append(&sync_publish_bridge);
-
-    let group = PreferencesGroup::new();
     let src_row = ActionRow::builder()
         .title("Source")
         .subtitle(&pkg.pkgbuild_url)
         .build();
-    group.add(&src_row);
-
     let work = state.borrow().config.work_dir.clone();
 
     let dest_row = ActionRow::builder()
@@ -126,8 +112,22 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     dest_actions.append(&browse_btn);
     dest_actions.append(&default_btn);
     dest_row.add_suffix(&dest_actions);
-    group.add(&dest_row);
-    content.append(&group);
+
+    let sync_section = ui::collapsible_preferences_section(
+        "Sync and Publish",
+        Some(
+            "Publish copies PKGBUILD and .SRCINFO from the destination below into the AUR Git \
+             clone, then commits when you choose. A successful push updates the public AUR \
+             immediately. On a brand-new pkgbase, the first clone may warn that the repository \
+             is empty—that is expected.",
+        ),
+        false,
+        |exp| {
+            exp.add_row(&src_row);
+            exp.add_row(&dest_row);
+        },
+    );
+    content.append(&sync_section);
 
     let status = Label::builder().halign(Align::Start).build();
     content.append(&status);

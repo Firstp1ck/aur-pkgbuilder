@@ -6,8 +6,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use adw::{ActionRow, Banner, EntryRow, ExpanderRow, PreferencesGroup, Toast, ToastOverlay};
+use adw::{ActionRow, Banner, EntryRow, ExpanderRow, Toast, ToastOverlay};
 use glib::source::{SourceId, timeout_add_local_once};
+use gtk4::ListBox;
 use gtk4::{
     Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer,
     TextTag, TextView, WrapMode,
@@ -15,6 +16,7 @@ use gtk4::{
 
 use crate::runtime;
 use crate::state::AppStateRef;
+use crate::ui;
 use crate::ui::pkgbuild_stale;
 use crate::ui::shell::MainShell;
 use crate::workflow::build as build_wf;
@@ -304,7 +306,7 @@ fn add_quick_rows(exp: &ExpanderRow, st: &Rc<EditorState>) {
 /// - `toasts`: success / failure feedback.
 ///
 /// Output:
-/// - A [`PreferencesGroup`] ready to append into the Version page.
+/// - A boxed [`ListBox`] whose expander wraps the editor block for the Version page.
 ///
 /// Details:
 /// - `stale_banner` lives on the Version page; Reload updates it after
@@ -315,18 +317,7 @@ pub fn build_section(
     pkg: &PackageDef,
     toasts: &ToastOverlay,
     stale_banner: &Banner,
-) -> PreferencesGroup {
-    let group = PreferencesGroup::builder()
-        .title("Edit PKGBUILD")
-        .description(
-            "Reload loads the file from disk into the editor. Save writes the buffer. \
-             “Apply quick fields” merges the rows above into the full text (single-line \
-             assignments only — review the buffer afterward). Edit functions such as \
-             prepare(), build(), and package() in the full editor. \
-             Green highlights mark new lines vs the last load/save; removed lines appear in the red panel.",
-        )
-        .build();
-
+) -> ListBox {
     let work = state.borrow().config.work_dir.clone();
     let dir = sync::package_dir(work.as_deref(), pkg);
     let path_display = dir
@@ -340,7 +331,6 @@ pub fn build_section(
         )
         .revealed(dir.is_none())
         .build();
-    group.add(&banner);
 
     let path_row = ActionRow::builder()
         .title("PKGBUILD path")
@@ -376,7 +366,6 @@ pub fn build_section(
     btn_row.append(&save);
     btn_row.append(&srcinfo);
     path_row.add_suffix(&btn_row);
-    group.add(&path_row);
 
     let diff_removed_buf = TextBuffer::new(None);
     let removed_view = TextView::builder()
@@ -424,15 +413,12 @@ pub fn build_section(
         )
         .build();
     add_quick_rows(&expander, &st);
-    group.add(&expander);
 
     let full_label = Label::builder()
         .label("Full PKGBUILD (prepare, build, check, package, …)")
         .halign(Align::Start)
         .css_classes(["title-4"])
         .build();
-    group.add(&full_label);
-    group.add(&diff_removed_bar);
 
     let view = TextView::builder()
         .buffer(&st.buffer)
@@ -452,7 +438,6 @@ pub fn build_section(
         .min_content_height(520)
         .build();
     scroll.set_policy(PolicyType::Automatic, PolicyType::Automatic);
-    group.add(&scroll);
 
     let toasts_r = toasts.clone();
     let state_r = state.clone();
@@ -585,5 +570,23 @@ pub fn build_section(
         shell.notify_pkgbuild_reloaded_from_disk(state);
     }
 
-    group
+    ui::collapsible_preferences_section(
+        "Edit PKGBUILD",
+        Some(
+            "Reload loads the file from disk into the editor. Save writes the buffer. \
+             “Apply quick fields” merges the rows above into the full text (single-line \
+             assignments only — review the buffer afterward). Edit functions such as \
+             prepare(), build(), and package() in the full editor. \
+             Green highlights mark new lines vs the last load/save; removed lines appear in the red panel.",
+        ),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&banner);
+            exp.add_row(&path_row);
+            exp.add_row(&expander);
+            exp.add_row(&full_label);
+            exp.add_row(&diff_removed_bar);
+            exp.add_row(&scroll);
+        },
+    )
 }
