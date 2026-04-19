@@ -103,9 +103,10 @@ jobs:
           - runner: ubuntu-24.04-arm
             asset: aur-pkgbuilder-aarch64
     runs-on: ${{ matrix.runner }}
-    # Ubuntu runners ship libadwaita 1.5; release binaries target Arch (PKGBUILD-bin).
+    # Use GHCR Arch images (multi-arch). Docker Hub `library/archlinux:latest` has no
+    # linux/arm64 manifest, so `ubuntu-*-arm` jobs fail to pull it; see archlinux-docker README.
     container:
-      image: archlinux:latest
+      image: ghcr.io/archlinux/archlinux:latest
     steps:
       - name: Install build dependencies
         run: |
