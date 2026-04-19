@@ -21,14 +21,6 @@ First tagged release of **aur-pkgbuilder**: a GTK4 / libadwaita desktop app for 
 
 ---
 
-# Release v0.1.0
-
-First tagged release of **aur-pkgbuilder**: a GTK4 / libadwaita desktop app for AUR maintainers to sync PKGBUILDs, bump versions, validate, build with `makepkg`, and publish from one workspace.
-
-## What's New
-
-- **End-to-end workflow** — Home, connection checks, package sync, version step, validation, `makepkg` build, and AUR Git publish, with streaming logs in the app.
-
 # Changelog
 
 All notable changes to aur-pkgbuilder will be documented in this file.

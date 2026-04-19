@@ -1,0 +1,29 @@
+aur-pkgbuilder release log started: 2026-04-20T00:18:54+02:00
+Report file: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-pending-20260420-001854.txt
+
+
+[1;36m╔════════════════════════════════════════════════════════════════════════╗[0m
+[1;36m║                 AUR-PKGBUILDER RELEASE AUTOMATION                       ║[0m
+[1;36m╚════════════════════════════════════════════════════════════════════════╝[0m
+
+[0;34m[INFO] [0mChecking prerequisites...
+[0;32m[SUCCESS] [0mAll prerequisites met
+[0;34m[INFO] [0mChecking release layout directories (AUR clones, optional wiki)...
+[1;33m[WARN] [0maur-pkgbuilder-bin path invalid or missing PKGBUILD: /home/firstpick/aur-packages/aur-pkgbuilder-bin
+[0;36mEnter path to aur-pkgbuilder-bin clone ([1ms[0m to skip, [1mq[0m to abort): [0m[1;33m[WARN] [0maur-pkgbuilder-bin process will be skipped for this run.
+[0;34m[INFO] [0mSkipping aur-pkgbuilder-git layout check (SKIP_AUR_GIT_PROCESS=true).
+[1;33m[WARN] [0mWiki path not found: 
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: Starting job container
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: /usr/bin/docker pull archlinux:latest
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: latest: Pulling from library/archlinux
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: no matching manifest for linux/arm64/v8 in the manifest list entries
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: Warning: Docker pull failed with exit code 1, back off 5.411 seconds before retry.
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: /usr/bin/docker pull archlinux:latest
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: latest: Pulling from library/archlinux
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: no matching manifest for linux/arm64/v8 in the manifest list entries
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: Warning: Docker pull failed with exit code 1, back off 8.588 seconds before retry.
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: /usr/bin/docker pull archlinux:latest
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: latest: Pulling from library/archlinux
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: no matching manifest for linux/arm64/v8 in the manifest list entries
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;31m[ERROR] [0mNot a directory: Error: Docker pull failed with exit code 1
+[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m

@@ -2,77 +2,77 @@ aur-pkgbuilder release log started: 2026-04-20T00:14:42+02:00
 Report file: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-pending-20260420-001442.txt
 
 
-[1;36m╔════════════════════════════════════════════════════════════════════════╗[0m
-[1;36m║                 AUR-PKGBUILDER RELEASE AUTOMATION                       ║[0m
-[1;36m╚════════════════════════════════════════════════════════════════════════╝[0m
+╔════════════════════════════════════════════════════════════════════════╗
+║                 AUR-PKGBUILDER RELEASE AUTOMATION                       ║
+╚════════════════════════════════════════════════════════════════════════╝
 
-[0;34m[INFO] [0mChecking prerequisites...
-[0;32m[SUCCESS] [0mAll prerequisites met
-[0;34m[INFO] [0mChecking release layout directories (AUR clones, optional wiki)...
-[1;33m[WARN] [0maur-pkgbuilder-bin path invalid or missing PKGBUILD: /home/firstpick/aur-packages/aur-pkgbuilder-bin
-[0;36mEnter path to aur-pkgbuilder-bin clone ([1ms[0m to skip, [1mq[0m to abort): [0m[1;33m[WARN] [0maur-pkgbuilder-bin process will be skipped for this run.
-[0;34m[INFO] [0mSkipping aur-pkgbuilder-git layout check (SKIP_AUR_GIT_PROCESS=true).
-[1;33m[WARN] [0mWiki path not found: 
-[0;36mEnter path to GitHub wiki clone ([1mEnter[0m/[1ms[0m to skip wiki push): [0m[0;32m[SUCCESS] [0mWiki directory: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder.wiki
-[0;34m[INFO] [0mRunning pre-flight checks...
-[0;32m[SUCCESS] [0mOn main branch
-[0;31m[ERROR] [0mWorking directory is not clean
-[0;34m[INFO] [0mUncommitted changes:
+[INFO] Checking prerequisites...
+[SUCCESS] All prerequisites met
+[INFO] Checking release layout directories (AUR clones, optional wiki)...
+[WARN] aur-pkgbuilder-bin path invalid or missing PKGBUILD: /home/firstpick/aur-packages/aur-pkgbuilder-bin
+Enter path to aur-pkgbuilder-bin clone (s to skip, q to abort): [WARN] aur-pkgbuilder-bin process will be skipped for this run.
+[INFO] Skipping aur-pkgbuilder-git layout check (SKIP_AUR_GIT_PROCESS=true).
+[WARN] Wiki path not found: 
+Enter path to GitHub wiki clone (Enter/s to skip wiki push): [SUCCESS] Wiki directory: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder.wiki
+[INFO] Running pre-flight checks...
+[SUCCESS] On main branch
+[ERROR] Working directory is not clean
+[INFO] Uncommitted changes:
  M dev/scripts/release.sh
 ?? dev/RELEASE/
 
-[0;36mContinue with uncommitted changes? [Y/n]: [0m[0;34m[INFO] [0mUpdated report filename with version: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-0.1.0-20260420-001442.txt
+Continue with uncommitted changes? [Y/n]: [INFO] Updated report filename with version: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-0.1.0-20260420-001442.txt
 
-[0;36mAUR PKGBUILD: how should pkgrel change after pkgver is set?[0m
+AUR PKGBUILD: how should pkgrel change after pkgver is set?
   1) reset — pkgrel=1 (new version release)
   2) keep  — leave pkgrel as-is
   3) bump  — pkgrel +1 (same pkgver, packaging-only change)
-[0;36mChoose [1-3] (default 1): [0m
-[0;34m[INFO] [0mRelease version: [1m0.1.0[0m
-[0;34m[INFO] [0mCurrent version: [1m0.1.0[0m
-[0;34m[INFO] [0mAUR pkgrel mode: [1mkeep[0m
+Choose [1-3] (default 1): 
+[INFO] Release version: 0.1.0
+[INFO] Current version: 0.1.0
+[INFO] AUR pkgrel mode: keep
 
-[0;36mStart release process? [Y/n]: [0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;32m  PHASE: 1. Version Update[0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[0;34m[INFO] [0mCurrent version: [1m0.1.0[0m
-[0;34m[INFO] [0mNew version: [1m0.1.0[0m
+Start release process? [Y/n]: 
+════════════════════════════════════════════════════════════════════════
+  PHASE: 1. Version Update
+════════════════════════════════════════════════════════════════════════
+[INFO] Current version: 0.1.0
+[INFO] New version: 0.1.0
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Updating Cargo.toml[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;32m[SUCCESS] [0mUpdated Cargo.toml
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Updating Cargo.toml
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[SUCCESS] Updated Cargo.toml
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Updating Cargo.lock[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Updating Cargo.lock
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
-[0;32m[SUCCESS] [0mCargo.lock updated
+[SUCCESS] Cargo.lock updated
 
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;32m  PHASE: 2. Documentation[0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
+════════════════════════════════════════════════════════════════════════
+  PHASE: 2. Documentation
+════════════════════════════════════════════════════════════════════════
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Generate Release Notes[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mFollow [1m.cursor/commands/release-new.md[0m (version 0.1.0) with your AI/IDE tooling.
-[0;36mAfter completing the release-new workflow, press Enter...[0m[0;32m[SUCCESS] [0mRelease file created: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Generate Release Notes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Follow .cursor/commands/release-new.md (version 0.1.0) with your AI/IDE tooling.
+After completing the release-new workflow, press Enter...[SUCCESS] Release file created: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Updating CHANGELOG.md[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mVersion 0.1.0 already exists, replacing in place...
-[0;32m[SUCCESS] [0mCHANGELOG.md updated
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Updating CHANGELOG.md
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Version 0.1.0 already exists, replacing in place...
+[SUCCESS] CHANGELOG.md updated
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Auto-generate Announcement[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mExtracting full ## What's New section from release file...
-[0;32m[SUCCESS] [0mGenerated announcement (1251 bytes) at: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/ANNOUNCEMENTS/version_announcement_content.md
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Auto-generate Announcement
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Extracting full ## What's New section from release file...
+[SUCCESS] Generated announcement (1251 bytes) at: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/ANNOUNCEMENTS/version_announcement_content.md
 
-[0;36m--- Announcement Preview ---[0m
+--- Announcement Preview ---
 ## What's New
 
 - **End-to-end workflow** — Home, connection checks, package sync, version step, validation, `makepkg` build, and AUR Git publish, with streaming logs in the app.
@@ -83,39 +83,39 @@ Report file: /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/dev/RELEASE/release-report-
 - **Packages and paths** — JSONC config and registry, optional per-package destinations, validated paths, and folder pickers rooted on the window.
 - **Shell and UX** — Tabbed main shell with workflow navigation, connection/validation indicators, and packaged integration (icon and `.desktop` entry).
 
-[0;36m--- End Preview ---[0m
+--- End Preview ---
 
-[0;36mAccept this announcement? [Y/n]: [0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Update Version Announcement in Code[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;33m[WARN] [0mdev/scripts/update_version_announcement.py not found — skipping in-repo announcement wiring
+Accept this announcement? [Y/n]: 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Update Version Announcement in Code
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[WARN] dev/scripts/update_version_announcement.py not found — skipping in-repo announcement wiring
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Update README[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mFollow [1m.cursor/commands/readme-update.md[0m with your AI/IDE tooling.
-[0;36mAfter completing the readme-update workflow, press Enter...[0m[0;32m[SUCCESS] [0mREADME update complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Update README
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Follow .cursor/commands/readme-update.md with your AI/IDE tooling.
+After completing the readme-update workflow, press Enter...[SUCCESS] README update complete
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Update Wiki[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mFollow [1m.cursor/commands/wiki-update.md[0m with your AI/IDE tooling.
-[0;36mAfter completing the wiki-update workflow, press Enter...[0m[0;32m[SUCCESS] [0mWiki update complete
-[0;34m[INFO] [0mSkipping SECURITY.md update (patch release only)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Update Wiki
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Follow .cursor/commands/wiki-update.md with your AI/IDE tooling.
+After completing the wiki-update workflow, press Enter...[SUCCESS] Wiki update complete
+[INFO] Skipping SECURITY.md update (patch release only)
 
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;32m  PHASE: 3. PKGBUILD Updates[0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;33m[WARN] [0mSkipping PKGBUILD updates (both AUR processes skipped).
+════════════════════════════════════════════════════════════════════════
+  PHASE: 3. PKGBUILD Updates
+════════════════════════════════════════════════════════════════════════
+[WARN] Skipping PKGBUILD updates (both AUR processes skipped).
 
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;32m  PHASE: 4. Build and Release[0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
+════════════════════════════════════════════════════════════════════════
+  PHASE: 4. Build and Release
+════════════════════════════════════════════════════════════════════════
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Running quality and security checks[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Running quality and security checks
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Checking aur-pkgbuilder v0.1.0 (/mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.37s
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
@@ -327,55 +327,105 @@ warning[license-not-encountered]: license was not encountered
    │      ━━━━━━━━━━━━━━━ unmatched license allowance
 
 advisories ok, bans ok, licenses ok, sources ok
-[90m12:16AM[0m [32mINF[0m [1m23 commits scanned.[0m
-[90m12:16AM[0m [32mINF[0m [1mscanned ~1306388 bytes (1.31 MB) in 115ms[0m
-[90m12:16AM[0m [32mINF[0m [1mno leaks found[0m
-[0;32m[SUCCESS] [0mAll quality and security checks completed
+12:16AM INF 23 commits scanned.
+12:16AM INF scanned ~1306388 bytes (1.31 MB) in 115ms
+12:16AM INF no leaks found
+[SUCCESS] All quality and security checks completed
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Building release binary[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Building release binary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Finished `release` profile [optimized] target(s) in 0.12s
-[0;32m[SUCCESS] [0mRelease binary built
+[SUCCESS] Release binary built
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Committing and pushing changes[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Committing and pushing changes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [main dcd9a79] Release v0.1.0
  3 files changed, 407 insertions(+), 9 deletions(-)
  create mode 100644 dev/RELEASE/release-report-0.1.0-20260420-001442.txt
 To https://github.com/Firstp1ck/aur-pkgbuilder.git
    646f827..dcd9a79  main -> main
-[0;32m[SUCCESS] [0mChanges pushed to origin
+[SUCCESS] Changes pushed to origin
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Creating git tag[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;32m[SUCCESS] [0mCreated annotated tag: v0.1.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Creating git tag
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[SUCCESS] Created annotated tag: v0.1.0
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Pushing tag to GitHub[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Pushing tag to GitHub
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 To https://github.com/Firstp1ck/aur-pkgbuilder.git
  * [new tag]         v0.1.0 -> v0.1.0
-[0;32m[SUCCESS] [0mTag pushed to GitHub
+[SUCCESS] Tag pushed to GitHub
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: GitHub Release (Actions workflow)[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[0;34m[INFO] [0mSkipping local gh release create to avoid racing .github/workflows/release.yml (softprops/action-gh-release).
-[0;34m[INFO] [0mThe Release workflow builds per-arch binaries, uploads SHA256SUMS, uses the tag message (or a short default) as the release body, and marks prerelease when major < 1.
-[0;32m[SUCCESS] [0mOptional release notes file present (for your records): /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
-[0;34m[INFO] [0mMonitor: https://github.com/Firstp1ck/aur-pkgbuilder/actions (workflow: Release)
-[0;34m[INFO] [0mSkipping crates.io (this desktop application is distributed via GitHub releases and AUR, not crates.io).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: GitHub Release (Actions workflow)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Skipping local gh release create to avoid racing .github/workflows/release.yml (softprops/action-gh-release).
+[INFO] The Release workflow builds per-arch binaries, uploads SHA256SUMS, uses the tag message (or a short default) as the release body, and marks prerelease when major < 1.
+[SUCCESS] Optional release notes file present (for your records): /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
+[INFO] Monitor: https://github.com/Firstp1ck/aur-pkgbuilder/actions (workflow: Release)
+[INFO] Skipping crates.io (this desktop application is distributed via GitHub releases and AUR, not crates.io).
 
-[1;32m════════════════════════════════════════════════════════════════════════[0m
-[1;32m  PHASE: 5. AUR Update[0m
-[1;32m════════════════════════════════════════════════════════════════════════[0m
+════════════════════════════════════════════════════════════════════════
+  PHASE: 5. AUR Update
+════════════════════════════════════════════════════════════════════════
 
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;36m  STEP: Updating AUR SHA sums[0m
-[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
-[1;33m[WARN] [0mWait for GitHub Action 'release' to finish uploading the binary!
-[0;34m[INFO] [0mCheck: https://github.com/Firstp1ck/aur-pkgbuilder/actions
-[0;36mPress Enter when GitHub Action has completed...[0m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Updating AUR SHA sums
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[WARN] Wait for GitHub Action 'release' to finish uploading the binary!
+[INFO] Check: https://github.com/Firstp1ck/aur-pkgbuilder/actions
+Press Enter when GitHub Action has completed...[INFO] Skipping AUR SHA sums (aur-pkgbuilder-bin process skipped).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Pushing aur-pkgbuilder-bin to AUR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Skipping aur-pkgbuilder-bin AUR push.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Pushing aur-pkgbuilder-git to AUR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Skipping aur-pkgbuilder-git AUR push.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Syncing PKGBUILD(s) into upstream repo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] Skipping PKGBUILD sync (aur-pkgbuilder-bin process skipped).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP: Pushing Wiki Changes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[INFO] No wiki changes to commit
+
+╔════════════════════════════════════════════════════════════════════════╗
+║                    RELEASE COMPLETE! 🎉                               ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+[SUCCESS] Version 0.1.0 has been released!
+
+[INFO] Don't forget to verify:
+  • GitHub release: https://github.com/Firstp1ck/aur-pkgbuilder/releases
+  • GitHub Action uploaded the binary
+  • AUR packages are updated
+
+
+=== RELEASE SUMMARY ===
+final_status=success
+completed_steps=3
+skipped_steps=6
+
+[Completed]
+- Configured wiki directory
+- Phase 5.5: Wiki had no changes
+- Phase 5: AUR/Wiki updates
+
+[Skipped]
+- Skipped aur-pkgbuilder-bin process by user choice
+- Phase 3: PKGBUILD updates
+- Phase 5.1: AUR SHA update
+- Phase 5.2: aur-pkgbuilder-bin AUR push
+- Phase 5.3: aur-pkgbuilder-git AUR push
+- Phase 5.4: PKGBUILD sync to aur-pkgbuilder repo
