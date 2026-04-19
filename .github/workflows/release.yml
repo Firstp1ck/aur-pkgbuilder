@@ -54,12 +54,24 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if [ "$IS_TAG_PUSH" = "true" ]; then
+          RELEASE_FILE="Release-docs/RELEASE_${VERSION}.md"
+
+          if [ -f "$RELEASE_FILE" ]; then
+            echo "Found release notes file: $RELEASE_FILE"
+            RELEASE_NOTES=$(tail -n +3 "$RELEASE_FILE")
+            DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
+            {
+              echo "release_notes<<$DELIMITER"
+              echo "$RELEASE_NOTES"
+              echo "$DELIMITER"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$IS_TAG_PUSH" = "true" ]; then
             TAG_TYPE=$(git cat-file -t "$VERSION" 2>/dev/null || echo "")
             if [ "$TAG_TYPE" = "tag" ]; then
               TAG_NOTES=$(git show "$VERSION" --format='%B' --no-patch 2>/dev/null || echo "")
               TAG_NOTES=$(echo "$TAG_NOTES" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
               if [ -n "$TAG_NOTES" ]; then
+                echo "Found release notes in tag annotation"
                 DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
                 {
                   echo "release_notes<<$DELIMITER"
@@ -67,6 +79,7 @@ jobs:
                   echo "$DELIMITER"
                 } >> "$GITHUB_OUTPUT"
               else
+                echo "Tag is annotated but has no message, using default"
                 DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
                 {
                   echo "release_notes<<$DELIMITER"
@@ -75,6 +88,7 @@ jobs:
                 } >> "$GITHUB_OUTPUT"
               fi
             else
+              echo "Tag is lightweight (no annotation), using default"
               DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
               {
                 echo "release_notes<<$DELIMITER"
@@ -83,6 +97,7 @@ jobs:
               } >> "$GITHUB_OUTPUT"
             fi
           else
+            echo "Workflow triggered manually and no release file found, using default release notes"
             DELIMITER="RELEASE_NOTES_$(date +%s)_$$"
             {
               echo "release_notes<<$DELIMITER"
@@ -91,7 +106,8 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-  # Builds the per-arch binaries consumed by `PKGBUILD-bin`.
+  # Same pattern as pacsea: native ubuntu-latest / ubuntu-24.04-arm + apt (no job container).
+  # Binaries are built against the runner's glibc/GTK stack; PKGBUILD-bin ships them for Arch users.
   build-linux:
     name: Build Linux (${{ matrix.asset }})
     needs: get-version
@@ -103,21 +119,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             asset: aur-pkgbuilder-aarch64
     runs-on: ${{ matrix.runner }}
-    # Use GHCR Arch images (multi-arch). Docker Hub `library/archlinux:latest` has no
-    # linux/arm64 manifest, so `ubuntu-*-arm` jobs fail to pull it; see archlinux-docker README.
-    container:
-      image: ghcr.io/archlinux/archlinux:latest
     steps:
-      - name: Install build dependencies
-        run: |
-          pacman -Syu --noconfirm \
-            base-devel \
-            curl \
-            git \
-            gtk4 \
-            libadwaita \
-            pkgconf
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -128,6 +130,27 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libgraphene-1.0-dev \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libgdk-pixbuf-2.0-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            libwayland-dev \
+            libwayland-client0 \
+            libwayland-egl1
 
       - name: Build Release
         run: cargo build --release --locked

@@ -342,3 +342,44 @@ advisories ok, bans ok, licenses ok, sources ok
 [0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
 [1;36m  STEP: Committing and pushing changes[0m
 [0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[main b02d22d] Release v0.1.0
+ 4 files changed, 560 insertions(+), 145 deletions(-)
+ create mode 100644 dev/RELEASE/release-report-0.1.0-20260420-001906.txt
+ create mode 100644 dev/RELEASE/release-report-pending-20260420-001854.txt
+To https://github.com/Firstp1ck/aur-pkgbuilder.git
+   b136a69..b02d22d  main -> main
+[0;32m[SUCCESS] [0mChanges pushed to origin
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Creating git tag[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m[WARN] [0mTag v0.1.0 already exists
+[0;36mDelete and recreate tag? [Y/n]: [0mTag 'v0.1.0' gelöscht (war 25c4820)
+[0;32m[SUCCESS] [0mCreated annotated tag: v0.1.0
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Pushing tag to GitHub[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+To https://github.com/Firstp1ck/aur-pkgbuilder.git
+ * [new tag]         v0.1.0 -> v0.1.0
+[0;32m[SUCCESS] [0mTag pushed to GitHub
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: GitHub Release (Actions workflow)[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m[INFO] [0mSkipping local gh release create to avoid racing .github/workflows/release.yml (softprops/action-gh-release).
+[0;34m[INFO] [0mThe Release workflow builds per-arch binaries, uploads SHA256SUMS, uses the tag message (or a short default) as the release body, and marks prerelease when major < 1.
+[0;32m[SUCCESS] [0mOptional release notes file present (for your records): /mnt/SSD_NVME_4TB/GitHub/aur-pkgbuilder/Release-docs/RELEASE_v0.1.0.md
+[0;34m[INFO] [0mMonitor: https://github.com/Firstp1ck/aur-pkgbuilder/actions (workflow: Release)
+[0;34m[INFO] [0mSkipping crates.io (this desktop application is distributed via GitHub releases and AUR, not crates.io).
+
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+[1;32m  PHASE: 5. AUR Update[0m
+[1;32m════════════════════════════════════════════════════════════════════════[0m
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;36m  STEP: Updating AUR SHA sums[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m[WARN] [0mWait for GitHub Action 'release' to finish uploading the binary!
+[0;34m[INFO] [0mCheck: https://github.com/Firstp1ck/aur-pkgbuilder/actions
+[0;36mPress Enter when GitHub Action has completed...[0m
