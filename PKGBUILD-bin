@@ -42,7 +42,7 @@ optdepends=(
 provides=("aur-pkgbuilder=${pkgver}")
 conflicts=('aur-pkgbuilder' 'aur-pkgbuilder-git')
 
-# Tarball for LICENSE, README, desktop entry, and icon (architecture-independent).
+# Tarball for LICENSE, README, desktop/icon, i18n config, and locale YAML (architecture-independent).
 source=("aur-pkgbuilder-${_tag}.tar.gz::${url}/archive/refs/tags/${_tag}.tar.gz")
 
 # Architecture-specific prebuilt binaries attached to the GitHub release.
@@ -125,4 +125,9 @@ package() {
     install -Dm644 "$srcroot/README.md"                          "$pkgdir/usr/share/doc/$pkgname/README.md"
     install -Dm644 "$srcroot/data/aur-pkgbuilder.desktop"        "$pkgdir/usr/share/applications/aur-pkgbuilder.desktop"
     install -Dm644 "$srcroot/data/assets/pkg-builder.svg"        "$pkgdir/usr/share/icons/hicolor/scalable/apps/aur-pkgbuilder.svg"
+
+    # i18n: same layout as pacsea-bin — config under share/<app>/config, strings under share/<app>/locales
+    install -Dm644 "$srcroot/config/i18n.yml"                    "$pkgdir/usr/share/aur-pkgbuilder/config/i18n.yml"
+    install -d                                                   "$pkgdir/usr/share/aur-pkgbuilder/locales"
+    install -m644 "$srcroot/config/locales/"*.yml                "$pkgdir/usr/share/aur-pkgbuilder/locales/"
 }

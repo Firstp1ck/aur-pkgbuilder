@@ -24,6 +24,7 @@ const CONFIG_HEADER: &str = "\
 //   last_package           most recently opened package id
 //   aur_username           AUR account login used for the RPC lookup
 //   default_commit_message commit message template; use {pkg} for the package id
+//   locale                 UI language: unset = follow LC_MESSAGES/LANG; en-US or de-DE
 ";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,9 @@ pub struct Config {
     /// current package id. `None` means "use a sensible per-package default".
     #[serde(default)]
     pub default_commit_message: Option<String>,
+    /// UI locale override (`en-US`, `de-DE`, …). When unset, POSIX `LC_MESSAGES` / `LANG` decide.
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 impl Default for Config {
@@ -53,6 +57,7 @@ impl Default for Config {
             last_package: None,
             aur_username: None,
             default_commit_message: None,
+            locale: None,
         }
     }
 }

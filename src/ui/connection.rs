@@ -7,6 +7,7 @@ use gtk4::gio;
 use gtk4::glib::clone::Downgrade;
 use gtk4::{Align, Box as GtkBox, Button, FileLauncher, Image, Label, Orientation, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -28,17 +29,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("Verify SSH access to the AUR")
+        .label(i18n::t("connection.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Your AUR username identifies you for package lookups; your SSH key proves you \
-             own that account when you push. Edit the username under AUR account below, then \
-             press apply (✓) to save and verify registered packages. Make sure the tools, the \
-             key, and the working directory are ready before the first build.",
-        )
+        .label(i18n::t("connection.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -49,7 +45,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     // --- AUR account (username) ---
     let username_row = EntryRow::builder()
-        .title("AUR username")
+        .title(i18n::t("connection.username_title"))
         .show_apply_button(true)
         .build();
     if let Some(u) = state.borrow().config.aur_username.as_deref() {
@@ -101,10 +97,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                 ApplyAurUsernameOutcome::Cleared => {
                                     row_cb.set_text("");
                                     let msg = if registered_len == 0 {
-                                        "Username cleared.".to_string()
+                                        i18n::t("connection.username_cleared_short")
                                     } else {
-                                        format!(
-                                            "Username cleared. {registered_len} package(s) remain — save a username again to verify them on the AUR."
+                                        i18n::tf(
+                                            "connection.username_cleared_with_packages",
+                                            &[("n", &registered_len.to_string())],
                                         )
                                     };
                                     toasts_cb.add_toast(Toast::new(&msg));
@@ -112,24 +109,37 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                 ApplyAurUsernameOutcome::Verified { username, report } => {
                                     row_cb.set_text(&username);
                                     if report.unmatched_registry_ids.is_empty() {
-                                        toasts_cb.add_toast(Toast::new(&format!(
-                                            "Username saved. All {registered_len} registered package(s) appear under this account ({n} from AUR RPC, maintainer or co-maintainer).",
-                                            n = report.aur_package_count
+                                        toasts_cb.add_toast(Toast::new(&i18n::tf(
+                                            "connection.username_saved_all",
+                                            &[
+                                                ("registered", &registered_len.to_string()),
+                                                ("aur", &report.aur_package_count.to_string()),
+                                            ],
                                         )));
                                     } else {
                                         let list =
                                             format_unmatched_list(&report.unmatched_registry_ids);
-                                        toasts_cb.add_toast(Toast::new(&format!(
-                                            "Username saved. {k} package(s) are not listed for this account on the AUR (maintainer/co-maintainer RPC): {list}",
-                                            k = report.unmatched_registry_ids.len(),
+                                        toasts_cb.add_toast(Toast::new(&i18n::tf(
+                                            "connection.username_saved_partial",
+                                            &[
+                                                (
+                                                    "k",
+                                                    &report
+                                                        .unmatched_registry_ids
+                                                        .len()
+                                                        .to_string(),
+                                                ),
+                                                ("list", &list),
+                                            ],
                                         )));
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            toasts_cb.add_toast(Toast::new(&format!(
-                                "Could not verify username — not saved: {e}"
+                            toasts_cb.add_toast(Toast::new(&i18n::tf(
+                                "connection.username_verify_failed",
+                                &[("e", &e.to_string())],
                             )));
                         }
                     }
@@ -139,13 +149,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
     shell.register_connection_aur_username_row(&username_row);
     let account_section = ui::collapsible_preferences_section(
-        "AUR account",
-        Some(
-            "Same login as on aur.archlinux.org. Used for “Import from AUR account”, RPC \
-             lookups, and opening your profile when pasting SSH keys. Press the apply (✓) \
-             button to save — the AUR is queried first and registered packages are checked \
-             against your maintainer/co-maintainer list.",
-        ),
+        i18n::t("connection.account_section"),
+        Some(&i18n::t("connection.account_section_desc")),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&username_row);
@@ -155,22 +160,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     // --- Tools group ---
     let (tools_list, tools_exp) = ui::collapsible_preferences_section_with_expander(
-        "Required tools",
-        Some("These must be on PATH. Missing ones can be installed from the official repos."),
+        i18n::t("connection.tools_section"),
+        Some(&i18n::t("connection.tools_section_desc")),
         false,
     );
     content.append(&tools_list);
 
     let (recommended_list, recommended_exp) = ui::collapsible_preferences_section_with_expander(
-        "Recommended environment",
-        Some(
-            "These are not required to open the app, but they match common maintainer practice: \
-             install the `base-devel` group for toolchain completeness, use `fakeroot` for \
-             local `makepkg --fakeroot` checks, and add `devtools` so you can run clean-chroot \
-             builds (missing host libraries then show up before you push). Typical chroot state \
-             lives under `/var/lib/archbuild` after the first root is created. \
-             https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot",
-        ),
+        i18n::t("connection.recommended_section"),
+        Some(&i18n::t("connection.recommended_section_desc")),
         false,
     );
     content.append(&recommended_list);
@@ -232,7 +230,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let cfg = &state.borrow().config;
         cfg.work_dir.clone().unwrap_or_default()
     };
-    let workdir_row = EntryRow::builder().title("Working directory").build();
+    let workdir_row = EntryRow::builder()
+        .title(i18n::t("connection.workdir_title"))
+        .build();
     workdir_row.set_text(&workdir.to_string_lossy());
     let state_wd = state.clone();
     workdir_row.connect_changed(move |row| {
@@ -249,7 +249,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         cfg.ssh_key.clone().unwrap_or_default()
     };
     let ssh_row = EntryRow::builder()
-        .title("SSH key (optional override)")
+        .title(i18n::t("connection.ssh_key_title"))
         .build();
     ssh_row.set_text(&sshkey.to_string_lossy());
     let state_ssh = state.clone();
@@ -265,7 +265,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let browse_work = Button::builder()
         .icon_name("folder-open-symbolic")
         .valign(Align::Center)
-        .tooltip_text("Browse…")
+        .tooltip_text(i18n::t("connection.browse"))
         .css_classes(["flat"])
         .build();
     workdir_row.add_suffix(&browse_work);
@@ -275,32 +275,28 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         browse_work.connect_clicked(move |btn| {
             let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
-                toasts.add_toast(Toast::new("Could not open folder picker."));
+                toasts.add_toast(Toast::new(&i18n::t("connection.toast_folder_picker")));
                 return;
             };
             let start = path_from_entry_or_config(&row, || state.borrow().config.work_dir.clone());
             let row = row.clone();
             let state = state.clone();
-            folder_pick::pick_folder(
-                &parent,
-                "Choose working directory",
-                start.as_deref(),
-                move |picked| {
-                    let Some(path) = picked else {
-                        return;
-                    };
-                    row.set_text(&path.to_string_lossy());
-                    state.borrow_mut().config.work_dir = Some(path);
-                    save_config(&state);
-                },
-            );
+            let dlg_title = i18n::t("connection.choose_workdir");
+            folder_pick::pick_folder(&parent, &dlg_title, start.as_deref(), move |picked| {
+                let Some(path) = picked else {
+                    return;
+                };
+                row.set_text(&path.to_string_lossy());
+                state.borrow_mut().config.work_dir = Some(path);
+                save_config(&state);
+            });
         });
     }
 
     let browse_ssh = Button::builder()
         .icon_name("document-open-symbolic")
         .valign(Align::Center)
-        .tooltip_text("Browse…")
+        .tooltip_text(i18n::t("connection.browse"))
         .css_classes(["flat"])
         .build();
     ssh_row.add_suffix(&browse_ssh);
@@ -310,41 +306,42 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         browse_ssh.connect_clicked(move |btn| {
             let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
-                toasts.add_toast(Toast::new("Could not open file picker."));
+                toasts.add_toast(Toast::new(&i18n::t("connection.toast_file_picker")));
                 return;
             };
             let start = path_from_entry_or_config(&row, || state.borrow().config.ssh_key.clone());
             let row = row.clone();
             let state = state.clone();
-            folder_pick::pick_existing_file(
-                &parent,
-                "Choose SSH private key",
-                start.as_deref(),
-                move |picked| {
-                    let Some(path) = picked else {
-                        return;
-                    };
-                    row.set_text(&path.to_string_lossy());
-                    state.borrow_mut().config.ssh_key = Some(path);
-                    save_config(&state);
-                },
-            );
+            let dlg_title = i18n::t("connection.choose_ssh_key");
+            folder_pick::pick_existing_file(&parent, &dlg_title, start.as_deref(), move |picked| {
+                let Some(path) = picked else {
+                    return;
+                };
+                row.set_text(&path.to_string_lossy());
+                state.borrow_mut().config.ssh_key = Some(path);
+                save_config(&state);
+            });
         });
     }
 
-    let paths_section = ui::collapsible_preferences_section("Paths", None, false, |exp| {
-        exp.add_row(&workdir_row);
-        exp.add_row(&ssh_row);
-    });
+    let paths_section = ui::collapsible_preferences_section(
+        i18n::t("connection.paths_section"),
+        None,
+        false,
+        |exp| {
+            exp.add_row(&workdir_row);
+            exp.add_row(&ssh_row);
+        },
+    );
     content.append(&paths_section);
 
     // --- AUR probe ---
     let setup_row = ActionRow::builder()
-        .title("Set up SSH")
-        .subtitle("Pick a key, copy its public half, open the AUR account page.")
+        .title(i18n::t("connection.setup_ssh_title"))
+        .subtitle(i18n::t("connection.setup_ssh_subtitle"))
         .build();
     let setup_btn = Button::builder()
-        .label("Open setup")
+        .label(i18n::t("connection.open_setup"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
@@ -365,13 +362,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     let probe_row = ActionRow::builder()
-        .title("Test SSH connection")
-        .subtitle("ssh -T aur@aur.archlinux.org")
+        .title(i18n::t("connection.test_ssh_title"))
+        .subtitle(i18n::t("connection.test_ssh_subtitle"))
         .build();
     let probe_status = Label::builder().css_classes(vec!["dim-label"]).build();
     let probe_spinner = Spinner::new();
     let probe_btn = Button::builder()
-        .label("Run test")
+        .label(i18n::t("connection.run_test"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
@@ -379,8 +376,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     probe_row.add_suffix(&probe_spinner);
     probe_row.add_suffix(&probe_btn);
     let probe_section = ui::collapsible_preferences_section(
-        "AUR Archlinux",
-        Some("aur.archlinux.org — A successful probe means your SSH key is registered on the AUR."),
+        i18n::t("connection.aur_section"),
+        Some(&i18n::t("connection.aur_section_desc")),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&setup_row);
@@ -395,9 +392,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     // build / validate) even when SSH isn't verified yet. The Publish step
     // is the one that gates on `state.ssh_ok`.
     let continue_btn = Button::builder()
-        .label("Continue")
+        .label(i18n::t("connection.continue"))
         .halign(Align::End)
-        .tooltip_text("SSH verification is only required for the Publish step.")
+        .tooltip_text(i18n::t("connection.continue_tooltip"))
         .css_classes(vec!["suggested-action", "pill"])
         .build();
 
@@ -433,7 +430,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&continue_btn);
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("AUR connection", &toasts)
+    ui::home::wrap_page(&i18n::t("connection.page_title"), &toasts)
 }
 
 /// Uses the entry text when non-empty; otherwise the closure (typically config).
@@ -460,7 +457,13 @@ fn format_unmatched_list(ids: &[String]) -> String {
     if ids.len() <= MAX {
         ids.join(", ")
     } else {
-        format!("{} … (+{} more)", ids[..MAX].join(", "), ids.len() - MAX)
+        i18n::tf(
+            "connection.unmatched_more",
+            &[
+                ("head", &ids[..MAX].join(", ")),
+                ("more", &(ids.len() - MAX).to_string()),
+            ],
+        )
     }
 }
 
@@ -469,23 +472,36 @@ fn tool_row_ok(check: &ToolCheck) -> bool {
 }
 
 fn tool_row_subtitle(check: &ToolCheck) -> String {
+    let purpose_key = format!("preflight.rows.{}.purpose", check.name);
+    let hint_key = format!("preflight.rows.{}.install_hint", check.name);
+    let mut purpose_tr = i18n::t(&purpose_key);
+    if purpose_tr == purpose_key {
+        purpose_tr = check.purpose.to_string();
+    }
+    let mut hint_tr = i18n::t(&hint_key);
+    if hint_tr == hint_key {
+        hint_tr = check.install_hint.to_string();
+    }
     if !tool_row_ok(check) {
         return if let Some(d) = &check.detail {
-            format!("{d} — {}", check.install_hint)
+            i18n::tf(
+                "connection.tool_row.detail_hint",
+                &[("detail", d), ("hint", &hint_tr)],
+            )
         } else {
-            format!("missing — install: {}", check.install_hint)
+            i18n::tf("connection.tool_row.missing", &[("hint", &hint_tr)])
         };
     }
     if check.path.is_some() {
         if let Some(via) = check.resolved_via {
-            return format!("{} — using `{via}`", check.purpose);
+            return i18n::tf(
+                "connection.tool_row.purpose_path",
+                &[("purpose", &purpose_tr), ("via", via)],
+            );
         }
-        return check.purpose.to_string();
+        return purpose_tr;
     }
-    check
-        .detail
-        .clone()
-        .unwrap_or_else(|| check.purpose.to_string())
+    check.detail.clone().unwrap_or(purpose_tr)
 }
 
 fn render_tool_row(check: &ToolCheck) -> ActionRow {
@@ -522,9 +538,7 @@ fn connect_open_packaging_target(
     let toasts = toasts.clone();
     btn.connect_clicked(move |btn| {
         let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
-            toasts.add_toast(Toast::new(
-                "Could not find a parent window for opening the path.",
-            ));
+            toasts.add_toast(Toast::new(&i18n::t("connection.toast_no_parent_window")));
             return;
         };
         let path = preflight::packaging_config_path(target);
@@ -533,9 +547,12 @@ fn connect_open_packaging_target(
         let toasts_launch = toasts.clone();
         launcher.launch(Some(&parent), None::<&gio::Cancellable>, move |res| {
             if let Err(e) = res {
-                toasts_launch.add_toast(Toast::new(&format!(
-                    "Could not open {}: {e}",
-                    path.display()
+                toasts_launch.add_toast(Toast::new(&i18n::tf(
+                    "connection.toast_open_path_failed",
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("err", &e.to_string()),
+                    ],
                 )));
             }
         });
@@ -544,11 +561,11 @@ fn connect_open_packaging_target(
 
 fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> gtk4::ListBox {
     let makepkg_row = ActionRow::builder()
-        .title("makepkg.conf")
+        .title(i18n::t("connection.makepkg_conf_title"))
         .subtitle("/etc/makepkg.conf")
         .build();
     let makepkg_btn = Button::builder()
-        .label("Open")
+        .label(i18n::t("connection.open"))
         .valign(Align::Center)
         .css_classes(["pill"])
         .build();
@@ -556,11 +573,11 @@ fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> gtk4::ListBox {
     connect_open_packaging_target(&makepkg_btn, toasts, PackagingConfigTarget::MakepkgConf);
 
     let devtools_row = ActionRow::builder()
-        .title("devtools files")
-        .subtitle("/usr/share/devtools")
+        .title(i18n::t("connection.devtools_title"))
+        .subtitle(i18n::t("connection.devtools_subtitle"))
         .build();
     let devtools_btn = Button::builder()
-        .label("Open")
+        .label(i18n::t("connection.open"))
         .valign(Align::Center)
         .css_classes(["pill"])
         .build();
@@ -572,11 +589,8 @@ fn packaging_config_shortcuts_group(toasts: &ToastOverlay) -> gtk4::ListBox {
     );
 
     ui::collapsible_preferences_section(
-        "Packaging configuration",
-        Some(
-            "Opens fixed system paths with your desktop default application (via GTK). \
-             If nothing happens, set a default handler for `.conf` files or folders.",
-        ),
+        i18n::t("connection.packaging_section"),
+        Some(&i18n::t("connection.packaging_section_desc")),
         false,
         |exp| {
             exp.add_row(&makepkg_row);

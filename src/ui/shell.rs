@@ -16,6 +16,7 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::{Align, Box as GtkBox, Button, Label, ListBox, Orientation};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::workflow::package::PackageDef;
@@ -128,15 +129,15 @@ impl MainShell {
 
         let home_page = crate::ui::home::build(&shell, state);
         let tp_home = tab_view.append(&home_page);
-        tp_home.set_title("Home");
+        tp_home.set_title(&i18n::t("shell.tab.home"));
 
         let conn_page = crate::ui::connection::build(&shell, state);
         let tp_conn = tab_view.append(&conn_page);
-        tp_conn.set_title("Connection");
+        tp_conn.set_title(&i18n::t("shell.tab.connection"));
 
         let manage_page = crate::ui::manage::build(&shell, state);
         let tp_manage = tab_view.append(&manage_page);
-        tp_manage.set_title("Manage");
+        tp_manage.set_title(&i18n::t("shell.tab.manage"));
 
         let mut pages = vec![tp_home.clone(), tp_conn.clone(), tp_manage.clone()];
         *inner.home_tab_page.borrow_mut() = Some(tp_home.clone());
@@ -150,7 +151,7 @@ impl MainShell {
         outer.append(&tab_view);
 
         let root = NavigationPage::builder()
-            .title("AUR Builder")
+            .title(i18n::t("shell.root_page_title"))
             .child(&outer)
             .build();
         root.set_tag(Some("home"));
@@ -199,6 +200,60 @@ impl MainShell {
         pages[ProcessTab::Sync as usize].set_title(&sync_tab_title(state));
         pages[ProcessTab::Version as usize]
             .set_title(&version_tab_title(&self.inner.pkgver_tab_cache.borrow()));
+    }
+
+    /// What: Refreshes tab and root titles after the UI locale changes in memory.
+    ///
+    /// Inputs:
+    /// - `state`: Shared app state (middle tabs depend on the selected package).
+    ///
+    /// Output:
+    /// - Rebuilds Home, Connection, Manage, and Sync–Publish tab bodies, reapplies tab titles,
+    ///   updates the root navigation title, and re-syncs connection/validate tab indicators.
+    ///
+    /// Details:
+    /// - Call after [`crate::i18n::set_active_locale`] and saving `config.locale`.
+    /// - Static labels on the outer tabs are created at build time; replacing those pages is what
+    ///   makes the new locale visible immediately (middle tabs alone were insufficient).
+    pub fn refresh_shell_locale(&self, state: &AppStateRef) {
+        let mut pages = self.inner.tab_pages.borrow().clone();
+        if pages.len() == ProcessTab::COUNT {
+            let _allow_close =
+                AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
+            let tv = &self.inner.tab_view;
+            self.refresh_middle_tabs_unguarded(state, &mut pages);
+
+            // High index first so [`TabView`] positions stay aligned with [`ProcessTab`] order.
+            tv.close_page(&pages[ProcessTab::Manage as usize]);
+            let manage_page = crate::ui::manage::build(self, state);
+            let tp_manage = tv.insert(&manage_page, ProcessTab::Manage as i32);
+            tp_manage.set_title(&i18n::t("shell.tab.manage"));
+            pages[ProcessTab::Manage as usize] = tp_manage;
+
+            tv.close_page(&pages[ProcessTab::Connection as usize]);
+            let conn_page = crate::ui::connection::build(self, state);
+            let tp_conn = tv.insert(&conn_page, ProcessTab::Connection as i32);
+            tp_conn.set_title(&i18n::t("shell.tab.connection"));
+            pages[ProcessTab::Connection as usize] = tp_conn;
+
+            tv.close_page(&pages[ProcessTab::Home as usize]);
+            let home_page = crate::ui::home::build(self, state);
+            let tp_home = tv.insert(&home_page, ProcessTab::Home as i32);
+            tp_home.set_title(&i18n::t("shell.tab.home"));
+            *self.inner.home_tab_page.borrow_mut() = Some(tp_home.clone());
+            pages[ProcessTab::Home as usize] = tp_home;
+
+            *self.inner.tab_pages.borrow_mut() = pages;
+        }
+        self.refresh_tab_headers_from_state(state);
+        if let Some(root) = self.inner.nav.find_page("home") {
+            let t = i18n::t("shell.root_page_title");
+            root.set_title(&t);
+        }
+        let ssh = state.borrow().ssh_ok;
+        self.apply_connection_tab_icon(Some(ssh));
+        self.spawn_connection_badge_refresh(state);
+        self.spawn_validate_badge_refresh(state);
     }
 
     /// Probe required tools + optional AUR SSH for the Connection tab indicator.
@@ -271,7 +326,7 @@ impl MainShell {
         let _allow_close = AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
         self.inner.tab_view.close_page(&old_tp);
         let new_tp = self.inner.tab_view.insert(&new_page, idx as i32);
-        new_tp.set_title("Publish");
+        new_tp.set_title(&i18n::t("shell.tab.publish"));
         let mut pages = self.inner.tab_pages.borrow_mut();
         if pages.len() == ProcessTab::COUNT {
             pages[idx] = new_tp;
@@ -390,14 +445,12 @@ impl MainShell {
             Some(true) => {
                 let icon = gio::ThemedIcon::new("emblem-ok-symbolic");
                 tp.set_indicator_icon(Some(&icon));
-                tp.set_indicator_tooltip("Required tools and AUR SSH look OK");
+                tp.set_indicator_tooltip(&i18n::t("shell.connection_ok_tooltip"));
             }
             Some(false) => {
                 let icon = gio::ThemedIcon::new("window-close-symbolic");
                 tp.set_indicator_icon(Some(&icon));
-                tp.set_indicator_tooltip(
-                    "Something needs attention — open Connection for details and fix hints",
-                );
+                tp.set_indicator_tooltip(&i18n::t("shell.connection_bad_tooltip"));
             }
         }
     }
@@ -415,14 +468,12 @@ impl MainShell {
             Some(true) => {
                 let icon = gio::ThemedIcon::new("emblem-ok-symbolic");
                 tp.set_indicator_icon(Some(&icon));
-                tp.set_indicator_tooltip("Required validation tier passed");
+                tp.set_indicator_tooltip(&i18n::t("shell.validate_ok_tooltip"));
             }
             Some(false) => {
                 let icon = gio::ThemedIcon::new("window-close-symbolic");
                 tp.set_indicator_icon(Some(&icon));
-                tp.set_indicator_tooltip(
-                    "Required validation reported issues — open Validate for details",
-                );
+                tp.set_indicator_tooltip(&i18n::t("shell.validate_bad_tooltip"));
             }
         }
     }
@@ -510,42 +561,76 @@ impl MainShell {
 
     /// Replace tab indices 2..=6 (Sync–Publish) in `pages` and update `tabs_package_id`.
     fn refresh_middle_tabs(&self, state: &AppStateRef, pages: &mut Vec<adw::TabPage>) {
+        let _allow_close = AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
+        self.refresh_middle_tabs_unguarded(state, pages);
+    }
+
+    /// Same as [`Self::refresh_middle_tabs`] without toggling [`MainShellInner::allow_programmatic_tab_close`].
+    ///
+    /// Details:
+    /// - Caller must wrap closes in [`AllowProgrammaticTabClose`] (see [`Self::refresh_shell_locale`]).
+    fn refresh_middle_tabs_unguarded(&self, state: &AppStateRef, pages: &mut Vec<adw::TabPage>) {
         let tv = &self.inner.tab_view;
         let desired = state.borrow().package.as_ref().map(|p| p.id.clone());
 
         if pages.len() == ProcessTab::COUNT {
-            let _allow_close =
-                AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
             for idx in (2..=6).rev() {
                 tv.close_page(&pages[idx]);
             }
-            pages.truncate(3);
+            // Tab view is now Home, Connection, Manage — keep those `TabPage`s only.
+            // `truncate(3)` would wrongly retain Sync at index 2 and drop Manage, so later
+            // `pages[ProcessTab::Manage]` would point at a closed tab (duplicate Manage on locale refresh).
+            let home = pages[ProcessTab::Home as usize].clone();
+            let conn = pages[ProcessTab::Connection as usize].clone();
+            let manage = pages[ProcessTab::Manage as usize].clone();
+            pages.clear();
+            pages.extend([home, conn, manage]);
         } else if pages.len() != 3 {
             return;
         }
 
-        let msg = "Pick a package on the Home tab first.";
-        let mids: Vec<(&str, NavigationPage)> = if state.borrow().package.is_some() {
+        let msg = i18n::t("shell.pick_package_hint");
+        let mids: Vec<(String, NavigationPage)> = if state.borrow().package.is_some() {
             vec![
-                ("Sync", crate::ui::sync::build(self, state)),
-                ("Version", crate::ui::version::build(self, state)),
-                ("Validate", crate::ui::validate::build(self, state)),
-                ("Build", crate::ui::build::build(self, state)),
-                ("Publish", crate::ui::publish::build(self, state)),
+                (
+                    i18n::t("shell.tab.sync"),
+                    crate::ui::sync::build(self, state),
+                ),
+                (
+                    i18n::t("shell.tab.version"),
+                    crate::ui::version::build(self, state),
+                ),
+                (
+                    i18n::t("shell.tab.validate"),
+                    crate::ui::validate::build(self, state),
+                ),
+                (
+                    i18n::t("shell.tab.build"),
+                    crate::ui::build::build(self, state),
+                ),
+                (
+                    i18n::t("shell.tab.publish"),
+                    crate::ui::publish::build(self, state),
+                ),
             ]
         } else {
+            let sync_t = i18n::t("shell.tab.sync");
+            let ver_t = i18n::t("shell.tab.version");
+            let val_t = i18n::t("shell.tab.validate");
+            let bld_t = i18n::t("shell.tab.build");
+            let pub_t = i18n::t("shell.tab.publish");
             vec![
-                ("Sync", placeholder_page("Sync", msg, self, state)),
-                ("Version", placeholder_page("Version", msg, self, state)),
-                ("Validate", placeholder_page("Validate", msg, self, state)),
-                ("Build", placeholder_page("Build", msg, self, state)),
-                ("Publish", placeholder_page("Publish", msg, self, state)),
+                (sync_t.clone(), placeholder_page(&sync_t, &msg, self, state)),
+                (ver_t.clone(), placeholder_page(&ver_t, &msg, self, state)),
+                (val_t.clone(), placeholder_page(&val_t, &msg, self, state)),
+                (bld_t.clone(), placeholder_page(&bld_t, &msg, self, state)),
+                (pub_t.clone(), placeholder_page(&pub_t, &msg, self, state)),
             ]
         };
 
         for (pos, (title, page)) in (2_i32..).zip(mids) {
             let tp = tv.insert(&page, pos);
-            tp.set_title(title);
+            tp.set_title(&title);
             pages.insert(pos as usize, tp);
         }
 
@@ -555,26 +640,26 @@ impl MainShell {
 
 fn home_tab_title(count: usize) -> String {
     match count {
-        0 => "Home - (0 Packages)".to_string(),
-        1 => "Home - (1 Package)".to_string(),
-        n => format!("Home - ({n} Packages)"),
+        0 => i18n::t("shell.home_tab_0"),
+        1 => i18n::t("shell.home_tab_1"),
+        n => i18n::tf("shell.home_tab_n", &[("n", &n.to_string())]),
     }
 }
 
 fn sync_tab_title(state: &AppStateRef) -> String {
     let st = state.borrow();
     let Some(pkg) = st.package.as_ref() else {
-        return "Sync".to_string();
+        return i18n::t("shell.sync_tab_plain");
     };
-    format!("Sync - {}", ellipsize_package(pkg))
+    i18n::tf("shell.sync_tab_pkg", &[("pkg", &ellipsize_package(pkg))])
 }
 
 fn version_tab_title(pkgver_cache: &str) -> String {
     let v = pkgver_cache.trim();
     if v.is_empty() {
-        "Version".to_string()
+        i18n::t("shell.version_plain")
     } else {
-        format!("Version - {v}")
+        i18n::tf("shell.version_pkgver", &[("v", v)])
     }
 }
 
@@ -611,7 +696,7 @@ fn placeholder_page(
         .build();
     v.append(&label);
     let btn = Button::builder()
-        .label("Go to Home")
+        .label(i18n::t("shell.go_home"))
         .css_classes(["pill", "suggested-action"])
         .halign(Align::Start)
         .build();

@@ -8,10 +8,8 @@ use gtk4::{
     TextView, WrapMode,
 };
 
+use crate::i18n;
 use crate::workflow::build::LogLine;
-
-const PLACEHOLDER: &str =
-    "No output yet.\n\nStdout, stderr, and status lines from the tool will stream here.";
 
 /// What: A captioned monospace log pane with distinct styling for info, stdout,
 /// stderr, and an empty-state placeholder so the control reads as a log viewer
@@ -188,8 +186,11 @@ impl LogView {
 
     fn insert_placeholder(&self) {
         let mut iter = self.buffer.start_iter();
-        self.buffer
-            .insert_with_tags(&mut iter, PLACEHOLDER, &[&self.tag_placeholder]);
+        self.buffer.insert_with_tags(
+            &mut iter,
+            &i18n::t("log_view.placeholder"),
+            &[&self.tag_placeholder],
+        );
     }
 
     fn ensure_real_content(&self) {

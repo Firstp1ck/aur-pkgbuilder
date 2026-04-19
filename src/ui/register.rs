@@ -9,6 +9,7 @@ use adw::prelude::*;
 use adw::{ActionRow, AlertDialog, Banner, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, HeaderBar, Label, Orientation, Window};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -187,8 +188,10 @@ fn register_schedule_remote_pkgbuild_probe(
                         ssh_now,
                         &probe,
                     );
-                    toasts.add_toast(Toast::new(&format!(
-                        "Could not inspect AUR Git for PKGBUILD: {e:#}"
+                    let err = format!("{e:#}");
+                    toasts.add_toast(Toast::new(&i18n::tf(
+                        "register.toast_gitinspect_fail",
+                        &[("err", err.as_str())],
                     )));
                 }
             }
@@ -215,7 +218,10 @@ fn open_register_pkgbuild_editor(
         .modal(true)
         .default_width(760)
         .default_height(720)
-        .title(format!("Edit PKGBUILD — {}", pkg.id))
+        .title(i18n::tf(
+            "register.editor_title",
+            &[("id", pkg.id.as_str())],
+        ))
         .build();
     win.set_transient_for(Some(parent));
     let toasts_win = ToastOverlay::new();
@@ -251,7 +257,7 @@ fn open_register_pkgbuild_editor(
     ));
     let header = HeaderBar::new();
     let close = Button::builder()
-        .label("Close")
+        .label(i18n::t("register.btn_close"))
         .css_classes(["pill"])
         .build();
     let win_close = win.clone();
@@ -287,19 +293,14 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("Register new AUR package")
+        .label(i18n::t("register.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     content.append(&heading);
 
     let sub = Label::builder()
-        .label(
-            "Define the pkgbase and destination folder, then create a starter PKGBUILD if the file \
-             is missing and edit it here (same editor as the Version tab). Run Validate / clone / \
-             stage when ready, then Commit and push. This flow does not use the package selected on \
-             the Home list.",
-        )
+        .label(i18n::t("register.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -311,7 +312,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let remote_pkgbuild_probe = RegisterRemotePkgbuildProbe::default();
     let prepared_ok: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     let summary = Label::builder()
-        .label("No package defined yet — use “Define package…”.")
+        .label(i18n::t("register.summary_empty"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -321,10 +322,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let ssh_ready = state.borrow().ssh_ok;
     if !ssh_ready {
         let banner = Banner::builder()
-            .title(
-                "SSH is not verified yet. Set up SSH on the Connection tab before cloning or pushing to the AUR.",
-            )
-            .button_label("Set up SSH")
+            .title(i18n::t("register.banner_ssh_title"))
+            .button_label(i18n::t("register.banner_ssh_btn"))
             .revealed(true)
             .build();
         let nav_cb = shell.nav();
@@ -343,56 +342,47 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     let define_btn = Button::builder()
-        .label("Define package…")
+        .label(i18n::t("register.btn_define"))
         .css_classes(vec!["pill"])
         .build();
 
     let starter_btn = Button::builder()
-        .label("Create starter PKGBUILD")
+        .label(i18n::t("register.btn_starter"))
         .sensitive(false)
-        .tooltip_text(
-            "When SSH is ready: enabled only after a remote check shows the AUR Git repo has no PKGBUILD yet. \
-             Otherwise: enabled when PKGBUILD is missing locally. Writes a minimal PKGBUILD, then opens the editor.",
-        )
+        .tooltip_text(i18n::t("register.btn_starter_tooltip"))
         .css_classes(vec!["pill"])
         .build();
 
     let edit_pkgbuild_btn = Button::builder()
-        .label("Edit PKGBUILD…")
+        .label(i18n::t("register.btn_edit"))
         .sensitive(false)
-        .tooltip_text(
-            "When SSH is ready: enabled after a remote check finds PKGBUILD on the AUR Git repo, or when PKGBUILD \
-             already exists locally. Opens the same editor as the Version tab.",
-        )
+        .tooltip_text(i18n::t("register.btn_edit_tooltip"))
         .css_classes(vec!["pill"])
         .build();
 
     let history_chk = CheckButton::builder()
-        .label("Allow existing remote Git history (deleted pkgbase recovery)")
-        .tooltip_text(
-            "When the AUR Git remote already has commits, enable this before Prepare if you intend to continue. \
-             Changing this after a successful prepare clears the push step until you run Prepare again.",
-        )
+        .label(i18n::t("register.chk_history"))
+        .tooltip_text(i18n::t("register.chk_history_tooltip"))
         .build();
 
     let prepare_btn = Button::builder()
-        .label("Validate, clone, and stage")
+        .label(i18n::t("register.btn_prepare"))
         .sensitive(ssh_ready)
         .tooltip_text(if ssh_ready {
-            "Runs namespace checks, validation, .SRCINFO, git clone, and stages into the AUR clone. Push is separate."
+            i18n::t("register.btn_prepare_tooltip_ssh")
         } else {
-            "Set up and verify SSH first (clone uses SSH)."
+            i18n::t("register.btn_prepare_tooltip_no_ssh")
         })
         .css_classes(vec!["pill"])
         .build();
 
     let push_btn = Button::builder()
-        .label("Commit and push to AUR")
+        .label(i18n::t("register.btn_push"))
         .sensitive(false)
         .tooltip_text(if ssh_ready {
-            "Enabled after a successful prepare. Commits “Initial import” and pushes — publishes immediately."
+            i18n::t("register.btn_push_tooltip_ssh")
         } else {
-            "Set up and verify SSH first."
+            i18n::t("register.btn_push_tooltip_no_ssh")
         })
         .css_classes(vec!["pill", "destructive-action"])
         .build();
@@ -458,15 +448,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                             toasts: toasts.clone(),
                         },
                     );
-                    summary.set_label(&format!(
-                        "Ready: {id} — {}",
-                        pkg_cell
-                            .borrow()
-                            .as_ref()
-                            .map(|p| p.title.as_str())
-                            .unwrap_or("")
+                    let title = pkg_cell
+                        .borrow()
+                        .as_ref()
+                        .map(|p| p.title.clone())
+                        .unwrap_or_default();
+                    summary.set_label(&i18n::tf(
+                        "register.summary_ready",
+                        &[("id", id.as_str()), ("title", title.as_str())],
                     ));
-                    toasts.add_toast(Toast::new(&format!("Saved {id} to the local registry.")));
+                    toasts.add_toast(Toast::new(&i18n::tf(
+                        "register.toast_saved",
+                        &[("id", id.as_str())],
+                    )));
                 },
             );
         });
@@ -485,19 +479,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         starter_btn.connect_clicked(move |btn| {
             let parent_win = btn.root().and_downcast::<Window>();
             let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on the Connection tab first.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_workdir_first")));
                 return;
             };
             let Some(pkg) = pkg_cell.borrow().clone() else {
-                toasts.add_toast(Toast::new("Define a package first."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_define_first")));
                 return;
             };
             let Some(dir) = sync::package_dir(Some(work.as_path()), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Pick a destination folder (Define package…) so the PKGBUILD path is known.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_pick_dest")));
                 return;
             };
             let id = pkg.id.clone();
@@ -529,8 +519,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     Ok(StarterPkgbuildOutcome::Created) => {
                         *prepared_ok.borrow_mut() = false;
                         push_btn.set_sensitive(false);
-                        toasts.add_toast(Toast::new(&format!(
-                            "Wrote starter PKGBUILD for {id_toast} — opened the editor; run Prepare when ready."
+                        toasts.add_toast(Toast::new(&i18n::tf(
+                            "register.toast_starter_wrote",
+                            &[("id", id_toast.as_str())],
                         )));
                         sync_register_pkgbuild_actions(
                             &starter_btn_spawn,
@@ -555,12 +546,14 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                         }
                     }
                     Ok(StarterPkgbuildOutcome::SkippedExisting) => {
-                        toasts.add_toast(Toast::new(
-                            "PKGBUILD already exists — starter was not written. Use Edit PKGBUILD or delete the file first.",
-                        ));
+                        toasts.add_toast(Toast::new(&i18n::t("register.toast_starter_skipped")));
                     }
                     Err(e) => {
-                        toasts.add_toast(Toast::new(&format!("Could not create starter: {e}")));
+                        let err = e.to_string();
+                        toasts.add_toast(Toast::new(&i18n::tf(
+                            "register.toast_starter_fail",
+                            &[("err", err.as_str())],
+                        )));
                     }
                 },
             );
@@ -576,11 +569,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let toasts = toasts.clone();
         edit_pkgbuild_btn.connect_clicked(move |btn| {
             let Some(pkg) = pkg_cell.borrow().clone() else {
-                toasts.add_toast(Toast::new("Define a package first."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_define_first")));
                 return;
             };
             let Some(parent) = btn.root().and_downcast::<Window>() else {
-                toasts.add_toast(Toast::new("Could not open editor window."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_editor_open")));
                 return;
             };
             open_register_pkgbuild_editor(
@@ -605,19 +598,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     let row = ActionRow::builder()
-        .title("Package")
-        .subtitle("Create or overwrite the registry row from the editor.")
+        .title(i18n::t("register.row_package_title"))
+        .subtitle(i18n::t("register.row_package_subtitle"))
         .build();
     row.add_suffix(&define_btn);
     content.append(&row);
 
     let pkgbuild_row = ActionRow::builder()
-        .title("PKGBUILD")
-        .subtitle(
-            "With SSH ready, the app probes the AUR Git remote (shallow clone) because the persistent clone does not \
-             exist yet — **Create starter** only when the remote has no PKGBUILD; **Edit** when it does or when a \
-             local file exists. Without SSH, buttons follow local files only.",
-        )
+        .title(i18n::t("register.row_pkgbuild_title"))
+        .subtitle(i18n::t("register.row_pkgbuild_subtitle"))
         .build();
     pkgbuild_row.add_suffix(&starter_btn);
     pkgbuild_row.add_suffix(&edit_pkgbuild_btn);
@@ -637,8 +626,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&btn_row);
 
     let log = LogView::new(
-        "Register log",
-        "Prepare: namespace, validation, clone, and staging. Push: commit and git output.",
+        i18n::t("register.log_title"),
+        i18n::t("register.log_subtitle"),
     );
     content.append(log.widget());
 
@@ -653,13 +642,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let push_btn = push_btn.clone();
         prepare_btn.clone().connect_clicked(move |_| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on the Connection tab first.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_workdir_first")));
                 return;
             };
             let Some(pkg) = pkg_cell.borrow().clone() else {
-                toasts.add_toast(Toast::new("Define a package before preparing."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_define_prepare")));
                 return;
             };
             let remote_mode = if history_chk.is_active() {
@@ -691,9 +678,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                         Ok(()) => {
                             *prepared_done.borrow_mut() = true;
                             push_btn_done.set_sensitive(ssh_ready_done);
-                            toasts.add_toast(Toast::new(
-                                "Prepare finished — review the log, then use Commit and push when ready.",
-                            ));
+                            toasts.add_toast(Toast::new(&i18n::t("register.toast_prepare_done")));
                         }
                         Err(e) => {
                             toasts.add_toast(Toast::new(&e));
@@ -716,33 +701,27 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let prepared_for_push = Rc::clone(&prepared_ok);
         push_btn.clone().connect_clicked(move |btn| {
             if !*prepared_for_push.borrow() {
-                toasts.add_toast(Toast::new(
-                    "Run “Validate, clone, and stage” successfully before pushing.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_prepare_before_push")));
                 return;
             }
             let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on the Connection tab first.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_workdir_first")));
                 return;
             };
             let Some(pkg) = pkg_cell.borrow().clone() else {
-                toasts.add_toast(Toast::new("Define a package before pushing."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_define_push")));
                 return;
             };
             let Some(parent) = btn.root().and_downcast::<Window>() else {
-                toasts.add_toast(Toast::new("Could not open confirmation dialog."));
+                toasts.add_toast(Toast::new(&i18n::t("register.toast_no_confirm")));
                 return;
             };
-            let dialog = AlertDialog::new(
-                Some("Push to the AUR?"),
-                Some(
-                    "When the push succeeds, the PKGBUILD and .SRCINFO become public on the AUR. \
-                     There is no separate approval step. Confirm only if you are ready to publish.",
-                ),
-            );
-            dialog.add_responses(&[("cancel", "_Cancel"), ("push", "_Commit and push")]);
+            let alert_title = i18n::t("register.alert_push_title");
+            let alert_body = i18n::t("register.alert_push_body");
+            let dialog = AlertDialog::new(Some(&alert_title), Some(&alert_body));
+            let cancel_l = i18n::t("home.dialog_response_cancel");
+            let push_l = i18n::t("register.response_push");
+            dialog.add_responses(&[("cancel", &cancel_l), ("push", &push_l)]);
             dialog.set_default_response(Some("cancel"));
             dialog.set_response_appearance("push", adw::ResponseAppearance::Suggested);
             let prepared_for_dialog = Rc::clone(&prepared_for_push);
@@ -800,9 +779,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                     shell_ok.refresh_home_list(&state_ok);
                                     nav_ok.pop();
                                     shell_ok.goto_tab(&state_ok, ProcessTab::Home);
-                                    toasts.add_toast(Toast::new(&format!(
-                                        "Registered {} on the AUR — opened on Home for Publish or Validate.",
-                                        pkg_ok.id
+                                    toasts.add_toast(Toast::new(&i18n::tf(
+                                        "register.toast_registered",
+                                        &[("id", pkg_ok.id.as_str())],
                                     )));
                                 }
                                 Err(e) => {
@@ -818,5 +797,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("Register", &toasts)
+    let nav_title = i18n::t("register.nav_title");
+    ui::home::wrap_page(&nav_title, &toasts)
 }

@@ -18,6 +18,7 @@ use gtk4::{
     TextTag, TextView, Window, WrapMode,
 };
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -101,22 +102,51 @@ impl EditorState {
             diff_debounce: RefCell::new(None),
             diff_removed_bar,
             diff_removed_buf,
-            maintainer: entry("Maintainer — # Maintainer: … (name <email>)"),
-            pkgname: entry(&format!("pkgname — should match AUR id “{}”", pkg.id)),
-            pkgver: entry("pkgver — upstream version"),
-            pkgrel: entry("pkgrel — release integer"),
-            pkgdesc: entry("pkgdesc — description (auto-quoted if needed)"),
-            arch: entry("arch — space-separated tokens → array"),
-            url: entry("url — upstream / project URL"),
-            license: entry("license — space-separated → array"),
-            depends: entry("depends — space-separated package names"),
-            makedepends: entry("makedepends — build deps, space-separated"),
-            optdepends: entry(
-                "optdepends — optional deps, space-separated (use text view for multi-word reasons)",
-            ),
-            conflicts: entry("conflicts — space-separated"),
-            provides: entry("provides — space-separated"),
-            source: entry("source — single-line tokens; use text view for long URLs"),
+            maintainer: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.maintainer"))
+                .build(),
+            pkgname: EntryRow::builder()
+                .title(i18n::tf(
+                    "pkgbuild_editor.field.pkgname",
+                    &[("id", pkg.id.as_str())],
+                ))
+                .build(),
+            pkgver: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.pkgver"))
+                .build(),
+            pkgrel: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.pkgrel"))
+                .build(),
+            pkgdesc: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.pkgdesc"))
+                .build(),
+            arch: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.arch"))
+                .build(),
+            url: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.url"))
+                .build(),
+            license: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.license"))
+                .build(),
+            depends: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.depends"))
+                .build(),
+            makedepends: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.makedepends"))
+                .build(),
+            optdepends: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.optdepends"))
+                .build(),
+            conflicts: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.conflicts"))
+                .build(),
+            provides: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.provides"))
+                .build(),
+            source: EntryRow::builder()
+                .title(i18n::t("pkgbuild_editor.field.source"))
+                .build(),
         })
     }
 
@@ -314,7 +344,8 @@ fn fill_removed_preview(buf: &TextBuffer, lines: &[String]) {
     };
     let mut body = slice.join("\n");
     if truncated {
-        body.push_str("\n… (more removed lines not shown)");
+        body.push('\n');
+        body.push_str(&i18n::t("pkgbuild_editor.diff_more_removed"));
     }
     buf.set_text(&body);
     let Some(tag) = buf.tag_table().lookup(DIFF_TAG_REMOVED_PREVIEW) else {
@@ -323,10 +354,6 @@ fn fill_removed_preview(buf: &TextBuffer, lines: &[String]) {
     let s = buf.start_iter();
     let e = buf.end_iter();
     buf.apply_tag(&tag, &s, &e);
-}
-
-fn entry(title: &str) -> EntryRow {
-    EntryRow::builder().title(title).build()
 }
 
 /// What: Keeps a standalone editor [`Window`] height in sync when **Quick metadata** expands or collapses.
@@ -407,12 +434,12 @@ pub fn build_section(
 ) -> ListBox {
     let Some(pkg) = resolve_editor_pkg(pkg_source, state) else {
         return ui::collapsible_preferences_section(
-            "Edit PKGBUILD",
-            Some("Select a package on Home to use this editor."),
+            i18n::t("pkgbuild_editor.section_title"),
+            Some(i18n::t("pkgbuild_editor.section_subtitle_need_pkg").as_str()),
             ui::DEFAULT_SECTION_EXPANDED,
             |exp| {
                 let row = Banner::builder()
-                    .title("No package is selected on Home.")
+                    .title(i18n::t("pkgbuild_editor.banner_no_home_pkg"))
                     .revealed(true)
                     .build();
                 exp.add_row(&row);
@@ -427,34 +454,32 @@ pub fn build_section(
         .unwrap_or_else(|| sync::destination_help_line(work.as_deref(), &pkg));
 
     let banner = Banner::builder()
-        .title(
-            "Pick a destination folder on the Sync tab, or set a working directory on Connection.",
-        )
+        .title(i18n::t("pkgbuild_editor.no_pkg_banner"))
         .revealed(dir.is_none())
         .build();
 
     let path_row = ActionRow::builder()
-        .title("PKGBUILD path")
+        .title(i18n::t("pkgbuild_editor.path_row_title"))
         .subtitle(&path_display)
         .build();
     let reload = Button::builder()
-        .label("Reload")
+        .label(i18n::t("pkgbuild_editor.btn_reload"))
         .valign(Align::Center)
         .css_classes(["pill"])
         .build();
     let save = Button::builder()
-        .label("Save")
+        .label(i18n::t("pkgbuild_editor.btn_save"))
         .valign(Align::Center)
         .css_classes(["pill", "suggested-action"])
         .build();
     let apply = Button::builder()
-        .label("Apply quick fields")
+        .label(i18n::t("pkgbuild_editor.btn_apply"))
         .valign(Align::Center)
         .css_classes(["pill"])
         .build();
     let srcinfo = Button::builder()
-        .label(".SRCINFO")
-        .tooltip_text("Run makepkg --printsrcinfo in this directory (after Save).")
+        .label(i18n::t("pkgbuild_editor.btn_srcinfo"))
+        .tooltip_text(i18n::t("pkgbuild_editor.srcinfo_tooltip"))
         .valign(Align::Center)
         .css_classes(["pill"])
         .build();
@@ -497,7 +522,7 @@ pub fn build_section(
         .visible(false)
         .build();
     let removed_caption = Label::builder()
-        .label("Removed lines vs last load/save (like git −)")
+        .label(i18n::t("pkgbuild_editor.removed_caption"))
         .halign(Align::Start)
         .css_classes(["dim-label"])
         .build();
@@ -508,10 +533,8 @@ pub fn build_section(
     st.bind_diff_refresh();
 
     let expander = ExpanderRow::builder()
-        .title("Quick metadata")
-        .subtitle(
-            "Whitespace-separated tokens become bash arrays. Use the text view for functions.",
-        )
+        .title(i18n::t("pkgbuild_editor.quick_title"))
+        .subtitle(i18n::t("pkgbuild_editor.quick_subtitle"))
         .build();
     add_quick_rows(&expander, &st);
     if matches!(
@@ -542,7 +565,7 @@ pub fn build_section(
     };
 
     let full_label = Label::builder()
-        .label("Full PKGBUILD (prepare, build, check, package, …)")
+        .label(i18n::t("pkgbuild_editor.full_label"))
         .halign(Align::Start)
         .css_classes(["title-4"])
         .build();
@@ -575,14 +598,12 @@ pub fn build_section(
     reload.connect_clicked(move |_| {
         let stale_for_cb = stale_reload.clone();
         let Some(pkg) = resolve_editor_pkg(&pkg_source_reload, &state_r) else {
-            toasts_r.add_toast(Toast::new("No package is available for this editor."));
+            toasts_r.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_no_pkg")));
             return;
         };
         let work = state_r.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-            toasts_r.add_toast(Toast::new(
-                "Set a working directory on Connection or pick a destination folder on Sync.",
-            ));
+            toasts_r.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_set_workdir")));
             return;
         };
         let st = st_reload.clone();
@@ -620,9 +641,12 @@ pub fn build_section(
                         }
                     }
                     shell_cb.notify_pkgbuild_reloaded_from_disk(&state_cb);
-                    toasts.add_toast(Toast::new("PKGBUILD loaded"));
+                    toasts.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_loaded")));
                 }
-                Err(e) => toasts.add_toast(Toast::new(&format!("{e}"))),
+                Err(e) => {
+                    let err = e.to_string();
+                    toasts.add_toast(Toast::new(&err));
+                }
             },
         );
     });
@@ -634,14 +658,12 @@ pub fn build_section(
     let pkg_source_save = pkg_source.clone();
     save.connect_clicked(move |_| {
         let Some(pkg) = resolve_editor_pkg(&pkg_source_save, &state_s) else {
-            toasts_s.add_toast(Toast::new("No package is available for this editor."));
+            toasts_s.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_no_pkg")));
             return;
         };
         let work = state_s.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-            toasts_s.add_toast(Toast::new(
-                "Set a working directory on Connection or pick a destination folder on Sync.",
-            ));
+            toasts_s.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_set_workdir")));
             return;
         };
         let text = st_save.full_text();
@@ -658,9 +680,12 @@ pub fn build_section(
                     st.run_line_diff_highlights();
                     invoke_register_save_hook(&pkg_source_done);
                     shell_cb.notify_pkgbuild_saved(&state_cb);
-                    toasts.add_toast(Toast::new("PKGBUILD saved"));
+                    toasts.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_saved")));
                 }
-                Err(e) => toasts.add_toast(Toast::new(&format!("{e}"))),
+                Err(e) => {
+                    let err = e.to_string();
+                    toasts.add_toast(Toast::new(&err));
+                }
             },
         );
     });
@@ -671,9 +696,7 @@ pub fn build_section(
         let merged =
             pkgbuild_edit::merge_quick_fields(&st_apply.full_text(), &st_apply.collect_quick());
         st_apply.replace_buffer_preserving_baseline(&merged);
-        toasts_a.add_toast(Toast::new(
-            "Quick fields merged into the editor — review the full text, then Save.",
-        ));
+        toasts_a.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_merge_quick")));
     });
 
     let toasts_i = toasts.clone();
@@ -681,22 +704,32 @@ pub fn build_section(
     let pkg_source_srcinfo = pkg_source.clone();
     srcinfo.connect_clicked(move |_| {
         let Some(pkg) = resolve_editor_pkg(&pkg_source_srcinfo, &state_i) else {
-            toasts_i.add_toast(Toast::new("No package is available for this editor."));
+            toasts_i.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_no_pkg")));
             return;
         };
         let work = state_i.borrow().config.work_dir.clone();
         let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-            toasts_i.add_toast(Toast::new(
-                "Set a working directory on Connection or pick a destination folder on Sync.",
-            ));
+            toasts_i.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_set_workdir")));
             return;
         };
         let toasts = toasts_i.clone();
         runtime::spawn(
             async move { build_wf::write_srcinfo_silent(&dir).await },
             move |res| match res {
-                Ok(p) => toasts.add_toast(Toast::new(&format!("Wrote {}", p.display()))),
-                Err(e) => toasts.add_toast(Toast::new(&format!(".SRCINFO failed: {e}"))),
+                Ok(p) => {
+                    let path = p.display().to_string();
+                    toasts.add_toast(Toast::new(&i18n::tf(
+                        "pkgbuild_editor.toast_wrote",
+                        &[("path", path.as_str())],
+                    )));
+                }
+                Err(e) => {
+                    let err = e.to_string();
+                    toasts.add_toast(Toast::new(&i18n::tf(
+                        "pkgbuild_editor.toast_srcinfo_fail",
+                        &[("e", err.as_str())],
+                    )));
+                }
             },
         );
     });
@@ -716,36 +749,34 @@ pub fn build_section(
                     shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
                 }
                 Err(_) => {
-                    let hint = match pkg_source_init {
-                        PkgbuildEditorPkgSource::SelectedPackage => {
-                            "# No PKGBUILD on disk yet — use the Sync tab to download one, or paste here and Save.\n"
+                    let hint = format!(
+                        "{}\n",
+                        match pkg_source_init {
+                            PkgbuildEditorPkgSource::SelectedPackage => {
+                                i18n::t("pkgbuild_editor.stub_hint_version")
+                            }
+                            PkgbuildEditorPkgSource::RegisterWizard { .. } => {
+                                i18n::t("pkgbuild_editor.stub_hint_register")
+                            }
                         }
-                        PkgbuildEditorPkgSource::RegisterWizard { .. } => {
-                            "# No PKGBUILD on disk yet — use “Create starter PKGBUILD” on the Register page, or paste here and Save.\n"
-                        }
-                    };
-                    st_i.replace_buffer_and_baseline(hint);
+                    );
+                    st_i.replace_buffer_and_baseline(&hint);
                     shell_i.notify_pkgbuild_reloaded_from_disk(&state_i);
-                    toasts_i.add_toast(Toast::new("No PKGBUILD on disk yet"));
+                    toasts_i.add_toast(Toast::new(&i18n::t(
+                        "pkgbuild_editor.toast_no_pkgbuild_disk",
+                    )));
                 }
             },
         );
     } else {
-        st.replace_buffer_and_baseline(
-            "# Pick a destination folder on the Sync tab, or set a working directory on Connection.\n",
-        );
+        let stub = format!("{}\n", i18n::t("pkgbuild_editor.stub_no_dir"));
+        st.replace_buffer_and_baseline(&stub);
         shell.notify_pkgbuild_reloaded_from_disk(state);
     }
 
     ui::collapsible_preferences_section(
-        "Edit PKGBUILD",
-        Some(
-            "Reload loads the file from disk into the editor. Save writes the buffer. \
-             “Apply quick fields” merges the rows above into the full text (single-line \
-             assignments only — review the buffer afterward). Edit functions such as \
-             prepare(), build(), and package() in the full editor. \
-             Green highlights mark new lines vs the last load/save; removed lines appear in the red panel.",
-        ),
+        i18n::t("pkgbuild_editor.section_title"),
+        Some(i18n::t("pkgbuild_editor.section_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&banner);

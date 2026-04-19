@@ -16,6 +16,7 @@ use gtk4::{
     SizeGroupMode, StringList, Window,
 };
 
+use crate::i18n;
 use crate::state::AppStateRef;
 use crate::ui;
 use crate::ui::shell::{MainShell, ProcessTab};
@@ -90,13 +91,13 @@ pub enum HomePackageSort {
 }
 
 impl HomePackageSort {
-    /// UI labels matching [`Self::to_index`] order.
-    pub const LABELS: &'static [&'static str] = &[
-        "Name (A–Z)",
-        "Name (Z–A)",
-        "Kind",
-        "Last updated (newest)",
-        "Last updated (oldest)",
+    /// i18n keys matching [`Self::to_index`] order (resolved via [`crate::i18n::t`]).
+    pub const SORT_KEYS: &'static [&'static str] = &[
+        "home.sort.name_asc",
+        "home.sort.name_desc",
+        "home.sort.kind",
+        "home.sort.refresh_newest",
+        "home.sort.refresh_oldest",
     ];
 
     /// What: Maps a combo row index to a sort variant.
@@ -126,7 +127,7 @@ impl HomePackageSort {
     /// - `self`: Sort variant.
     ///
     /// Output:
-    /// - Index into [`Self::LABELS`].
+    /// - Index into [`Self::SORT_KEYS`].
     ///
     /// Details:
     /// - Matches `repr(u8)` discriminants for the five named variants.
@@ -157,8 +158,12 @@ pub enum HomePackageFilter {
 }
 
 impl HomePackageFilter {
-    /// UI labels matching [`Self::to_index`] order.
-    pub const LABELS: &'static [&'static str] = &["All packages", "Flagged only", "Not flagged"];
+    /// i18n keys matching [`Self::to_index`] order.
+    pub const FILTER_KEYS: &'static [&'static str] = &[
+        "home.filter.all",
+        "home.filter.flagged",
+        "home.filter.not_flagged",
+    ];
 
     /// What: Maps a combo row index to a filter variant.
     ///
@@ -185,7 +190,7 @@ impl HomePackageFilter {
     /// - `self`: Filter variant.
     ///
     /// Output:
-    /// - Index into [`Self::LABELS`].
+    /// - Index into [`Self::FILTER_KEYS`].
     ///
     /// Details:
     /// - Stable mapping independent of `repr`.
@@ -247,25 +252,34 @@ fn kind_rank(kind: PackageKind) -> u8 {
 /// - Matches [`crate::workflow::package::PackageDef`] field semantics; missing timestamps are explicit.
 fn home_pkg_last_updated_line(refreshed: Option<i64>, now_unix: i64) -> String {
     match refreshed {
-        None => "Last updated: never — run Sync or Version → Reload to record.".to_string(),
+        None => i18n::t("home.last_updated.never"),
         Some(ts) => {
             let age = now_unix.saturating_sub(ts);
             let detail = if age < 60 {
-                "just now".to_string()
+                i18n::t("home.last_updated.just_now")
             } else if age < 3600 {
-                format!("{} min ago", age / 60)
+                i18n::tf(
+                    "home.last_updated.min_ago",
+                    &[("n", &(age / 60).to_string())],
+                )
             } else if age < 86400 {
-                format!("{} h ago", age / 3600)
+                i18n::tf(
+                    "home.last_updated.hours_ago",
+                    &[("n", &(age / 3600).to_string())],
+                )
             } else if age < 7 * 86400 {
-                format!("{} days ago", age / 86400)
+                i18n::tf(
+                    "home.last_updated.days_ago",
+                    &[("n", &(age / 86400).to_string())],
+                )
             } else {
                 DateTime::from_unix_local(ts)
                     .ok()
                     .and_then(|dt| dt.format("%Y-%m-%d %H:%M").ok())
                     .map(|g| g.to_string())
-                    .unwrap_or_else(|| "unknown date".to_string())
+                    .unwrap_or_else(|| i18n::t("home.last_updated.unknown_date"))
             };
-            format!("Last updated: {detail}")
+            i18n::tf("home.last_updated.prefix", &[("detail", &detail)])
         }
     }
 }
@@ -439,11 +453,12 @@ fn wire_home_package_favorite_menu(
             .iter()
             .find(|p| p.id == pkg_id_press)
             .is_some_and(|p| p.favorite);
-        action_btn_press.set_label(if fav {
-            "Remove from favorites"
+        let fav_label = if fav {
+            i18n::t("home.remove_favorite")
         } else {
-            "Add to favorites"
-        });
+            i18n::t("home.add_favorite")
+        };
+        action_btn_press.set_label(&fav_label);
         let rect = gdk::Rectangle::new(x as i32, y as i32, 1, 1);
         popover_press.set_pointing_to(Some(&rect));
         popover_press.popup();
@@ -499,24 +514,27 @@ fn build_home_list_controls_bar(
         .build();
 
     let search = SearchEntry::builder()
-        .placeholder_text("Search packages…")
+        .placeholder_text(i18n::t("home.search_placeholder"))
         .hexpand(true)
         .halign(Align::Fill)
         .build();
 
     let sort_model = StringList::new(&[]);
-    for label in HomePackageSort::LABELS {
-        sort_model.append(label);
+    for key in HomePackageSort::SORT_KEYS {
+        sort_model.append(&i18n::t(key));
     }
-    let sort_row = ComboRow::builder().title("Sort").model(&sort_model).build();
+    let sort_row = ComboRow::builder()
+        .title(i18n::t("home.sort_title"))
+        .model(&sort_model)
+        .build();
     sort_row.set_selected(controls_rc.borrow().sort.to_index() as u32);
 
     let filter_model = StringList::new(&[]);
-    for label in HomePackageFilter::LABELS {
-        filter_model.append(label);
+    for key in HomePackageFilter::FILTER_KEYS {
+        filter_model.append(&i18n::t(key));
     }
     let filter_row = ComboRow::builder()
-        .title("Show")
+        .title(i18n::t("home.show_title"))
         .model(&filter_model)
         .build();
     filter_row.set_selected(controls_rc.borrow().filter.to_index() as u32);
@@ -592,15 +610,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("Pick a package to maintain")
+        .label(i18n::t("home.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-1"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Sync the PKGBUILD from its upstream source, build locally with makepkg, \
-             then push to the AUR. Add packages or start AUR registration from the buttons below.",
-        )
+        .label(i18n::t("home.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -629,7 +644,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .valign(Align::Start)
         .build();
 
-    let add_btn = Button::builder().label("Add package…").build();
+    let add_btn = Button::builder().label(i18n::t("home.add_package")).build();
     {
         let shell = shell.clone();
         let state = state.clone();
@@ -659,11 +674,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     };
                     shell.refresh_tabs_for_package(&state);
                     refresh_package_list(&list, &shell, &state, &list_controls);
-                    toasts.add_toast(Toast::new(&if replaced {
-                        format!("Updated {id}")
+                    let toast_msg = if replaced {
+                        i18n::tf("home.toast_pkg_updated", &[("id", &id)])
                     } else {
-                        format!("Added {id}")
-                    }));
+                        i18n::tf("home.toast_pkg_added", &[("id", &id)])
+                    };
+                    toasts.add_toast(Toast::new(&toast_msg));
                 },
             );
         });
@@ -684,10 +700,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     actions_row.append(&add_cluster);
 
     let register_btn = Button::builder()
-        .label("Register new AUR package")
-        .tooltip_text(
-            "Open the Register wizard: define a new pkgbase, validate, and push to create the AUR Git repository.",
-        )
+        .label(i18n::t("home.register_aur"))
+        .tooltip_text(i18n::t("home.register_aur_tooltip"))
         .css_classes(vec!["pill"])
         .build();
     {
@@ -702,7 +716,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     actions_row.append(&register_btn);
 
     let manage_btn = Button::builder()
-        .label("Manage packages…")
+        .label(i18n::t("home.manage_packages_dots"))
         .css_classes(vec!["pill"])
         .build();
     {
@@ -715,7 +729,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     actions_row.append(&manage_btn);
 
     let import_btn = Button::builder()
-        .label("Import from AUR account…")
+        .label(i18n::t("home.import_account_dots"))
         .css_classes(vec!["pill"])
         .build();
     {
@@ -730,11 +744,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     actions_row.append(&import_btn);
 
     let remove_mismatch_btn = Button::builder()
-        .label("Remove mismatched…")
-        .tooltip_text(
-            "Remove packages shown in red — not listed for your saved AUR username as maintainer \
-             or co-maintainer in the last Connection-tab check.",
-        )
+        .label(i18n::t("home.remove_mismatch"))
+        .tooltip_text(i18n::t("home.remove_mismatch_tooltip"))
         .css_classes(vec!["pill", "destructive-action"])
         .build();
     {
@@ -746,14 +757,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         remove_mismatch_btn.connect_clicked(move |btn| {
             let ids = mismatch_ids_still_in_registry(&state);
             if ids.is_empty() {
-                toasts.add_toast(Toast::new(
-                    "No mismatched packages to remove — run “apply” on your username on the AUR \
-                     Connection tab first, or none are registered.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("home.remove_mismatch_empty_toast")));
                 return;
             }
             let Some(parent) = btn.root().and_downcast::<Window>() else {
-                toasts.add_toast(Toast::new("Could not open confirmation dialog."));
+                toasts.add_toast(Toast::new(&i18n::t("home.toast_dialog_open_fail")));
                 return;
             };
             open_remove_mismatch_confirm(
@@ -772,12 +780,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&actions_row);
 
     let footer = Label::builder()
-        .label(
-            "Tip: use “Register new AUR package” for a first-time pkgbase push; use Publish \
-             when the AUR repo already exists. After you apply your username on the AUR \
-             Connection tab, rows in red are not listed for that login as maintainer or \
-             co-maintainer in the last RPC check.",
-        )
+        .label(i18n::t("home.footer_tip"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -786,7 +789,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&footer);
 
     toasts.set_child(Some(&content));
-    let page = wrap_page("Home", &toasts);
+    let page = wrap_page(&i18n::t("home.page_title"), &toasts);
 
     shell.set_home_list(&list);
 
@@ -811,8 +814,8 @@ pub(crate) fn refresh_package_list(
 
     if packages.is_empty() {
         let empty = ActionRow::builder()
-            .title("No packages yet")
-            .subtitle("Click “Add package…” below to register one.")
+            .title(i18n::t("home.empty_no_packages_title"))
+            .subtitle(i18n::t("home.empty_no_packages_sub"))
             .build();
         list.append(&empty);
         shell.refresh_tab_headers_from_state(state);
@@ -824,8 +827,8 @@ pub(crate) fn refresh_package_list(
 
     if filtered.is_empty() {
         let empty = ActionRow::builder()
-            .title("No matching packages")
-            .subtitle("Try adjusting search or filter.")
+            .title(i18n::t("home.empty_no_match_title"))
+            .subtitle(i18n::t("home.empty_no_match_sub"))
             .build();
         list.append(&empty);
         shell.refresh_tab_headers_from_state(state);
@@ -844,14 +847,16 @@ pub(crate) fn refresh_package_list(
 
     let has_favorites = !favorites.is_empty();
     if has_favorites {
-        list.append(&home_section_header_row("Favorites"));
+        let fav_heading = i18n::t("home.section.favorites");
+        list.append(&home_section_header_row(&fav_heading));
         for pkg in favorites {
             list.append(&render_package_row(list, shell, state, controls_rc, &pkg));
         }
     }
     if !others.is_empty() {
         if has_favorites {
-            list.append(&home_section_header_row("All packages"));
+            let all_heading = i18n::t("home.section.all_packages");
+            list.append(&home_section_header_row(&all_heading));
         }
         for pkg in others {
             list.append(&render_package_row(list, shell, state, controls_rc, &pkg));
@@ -886,10 +891,8 @@ fn render_package_row(
         .build();
     if mismatch {
         row.add_css_class("error");
-        row.set_tooltip_text(Some(
-            "Not listed for your saved AUR username as maintainer or co-maintainer in the last \
-             RPC check. Use AUR Connection → apply on the username field to re-check.",
-        ));
+        let mismatch_tip = i18n::t("home.row.mismatch_tooltip");
+        row.set_tooltip_text(Some(&mismatch_tip));
     }
     let prefix_box = GtkBox::builder()
         .orientation(Orientation::Horizontal)
@@ -899,7 +902,8 @@ fn render_package_row(
         let star = Image::from_icon_name("starred-symbolic");
         star.set_pixel_size(18);
         star.set_valign(Align::Center);
-        star.set_tooltip_text(Some("Favorite — also listed under Favorites above"));
+        let fav_tip = i18n::t("home.favorite_tooltip");
+        star.set_tooltip_text(Some(&fav_tip));
         prefix_box.append(&star);
     }
     let icon = Image::from_icon_name(pkg.icon());
@@ -913,13 +917,13 @@ fn render_package_row(
     let edit_btn = Button::builder()
         .icon_name("document-edit-symbolic")
         .valign(Align::Center)
-        .tooltip_text("Edit")
+        .tooltip_text(i18n::t("home.action.edit_tooltip"))
         .css_classes(vec!["flat"])
         .build();
     let remove_btn = Button::builder()
         .icon_name("user-trash-symbolic")
         .valign(Align::Center)
-        .tooltip_text("Remove")
+        .tooltip_text(i18n::t("home.action.remove_tooltip"))
         .css_classes(vec!["flat"])
         .build();
     row.add_suffix(&edit_btn);
@@ -1010,15 +1014,9 @@ fn render_package_row(
 /// - Do not set `vexpand` on these controls: that would stretch the entire Home action row to the
 ///   window height. Match heights via a vertical [`SizeGroup`] on the parent instead.
 fn add_package_help_button() -> MenuButton {
-    const HELP: &str = "Add package… opens the package editor to add or change this app's local \
-        registry entry: pkgbase id, PKGBUILD download URL, package kind, and optional sync or \
-        destination folders.\n\nIt does not create the Git repository on the AUR by itself—that \
-        is what Register new AUR package is for once that flow is complete.\n\nIf your packages \
-        already exist on the AUR, Import from AUR account… can add several rows from your \
-        username at once. Use Add package… when import lists nothing, you are preparing a new \
-        pkgbase before it exists on the AUR, or you need custom paths or titles.";
+    let help = i18n::t("home.add_package_help_body");
     let body = Label::builder()
-        .label(HELP)
+        .label(&help)
         .wrap(true)
         .xalign(0.0)
         .max_width_chars(52)
@@ -1032,9 +1030,10 @@ fn add_package_help_button() -> MenuButton {
         .build();
     frame.append(&body);
     let popover = Popover::builder().child(&frame).build();
+    let mb_tip = i18n::t("home.add_package_help_tooltip");
     MenuButton::builder()
         .icon_name("dialog-information-symbolic")
-        .tooltip_text("What does Add package… do?")
+        .tooltip_text(&mb_tip)
         .popover(&popover)
         .build()
 }
@@ -1109,8 +1108,9 @@ fn perform_remove_mismatched_packages(
     }
     shell.refresh_tabs_for_package(state);
     refresh_package_list(list, shell, state, controls_rc);
-    toasts.add_toast(Toast::new(&format!(
-        "Removed {n} package(s) from the local registry."
+    toasts.add_toast(Toast::new(&i18n::tf(
+        "home.toast_removed_n",
+        &[("n", &n.to_string())],
     )));
 }
 
@@ -1123,12 +1123,16 @@ fn open_remove_mismatch_confirm(
     toasts: &ToastOverlay,
     controls_rc: &Rc<RefCell<HomePackageListState>>,
 ) {
-    let body = format!(
-        "This removes only local registry entries (not the AUR). Packages: {}",
-        format_ids_for_confirm_dialog(&ids)
+    let title = i18n::t("home.dialog_remove_mismatch_title");
+    let packages = format_ids_for_confirm_dialog(&ids);
+    let body = i18n::tf(
+        "home.dialog_remove_mismatch_body",
+        &[("packages", &packages)],
     );
-    let dialog = AlertDialog::new(Some("Remove mismatched packages?"), Some(&body));
-    dialog.add_responses(&[("cancel", "_Cancel"), ("remove", "_Remove")]);
+    let dialog = AlertDialog::new(Some(&title), Some(&body));
+    let cancel_l = i18n::t("home.dialog_response_cancel");
+    let remove_l = i18n::t("home.dialog_response_remove");
+    dialog.add_responses(&[("cancel", &cancel_l), ("remove", &remove_l)]);
     dialog.set_default_response(Some("cancel"));
     dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
     let list = list.clone();

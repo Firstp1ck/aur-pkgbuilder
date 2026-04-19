@@ -1,0 +1,813 @@
+app.window_title: AUR Builder
+log_view.placeholder: |-
+  Noch keine Ausgabe.
+
+  Stdout, Stderr und Statuszeilen des Tools erscheinen hier.
+aur.role.co_maintainer: Co-Maintainer
+aur.role.maintainer: Maintainer
+aur_ssh.args_row_title: Zusatzargumente (Grund / Benutzernamen / Schlüsselwörter)
+aur_ssh.heading: AUR-SSH-Befehle
+aur_ssh.log_subtitle: Ausgaben von aur@aur.archlinux.org erscheinen hier für jeden ausgeführten Befehl.
+aur_ssh.log_title: SSH-Befehlsprotokoll
+aur_ssh.page_title: AUR-SSH-Befehle
+aur_ssh.pkg_row_title: Paket
+aur_ssh.run_btn: Ausführen
+aur_ssh.section_account_desc: Nur-Lese-Befehle, die das Paketfeld ignorieren.
+aur_ssh.section_account_title: Konto
+aur_ssh.section_maintenance_desc: Besitz ändern oder neues AUR-Repository anlegen. Destruktiv.
+aur_ssh.section_maintenance_title: Wartung
+aur_ssh.section_metadata_desc: Co-Maintainer-Liste oder Schlüsselwortmenge ersetzen.
+aur_ssh.section_metadata_title: Paket-Metadaten
+aur_ssh.section_target_desc: Paketname und optionale Argumente für die Schaltflächen unten.
+aur_ssh.section_target_title: Ziel
+aur_ssh.section_voting_desc: Betreffen nur Ihre Beziehung zum Paket.
+aur_ssh.section_voting_title: Abstimmung & Benachrichtigungen
+aur_ssh.subtitle: Verbindung zu aur@aur.archlinux.org mit der kuratierten Befehlsliste, die Maintainer üblicherweise manuell
+  nutzen. Der gewählte SSH-Schlüssel wird automatisch verwendet.
+aur_ssh.toast_enter_name: Bitte zuerst einen Paketnamen eingeben.
+aur_ssh.toast_err: '{cmd}: {err}'
+aur_ssh.toast_exit: '{cmd}: beendet mit {status}'
+aur_ssh.toast_ok: '{cmd}: ok'
+aur_ssh.args.hint_comaintainers: durch Leerzeichen getrennte AUR-Benutzernamen
+aur_ssh.args.hint_freeform_reason: freier Grund (optional)
+aur_ssh.args.hint_keywords: durch Leerzeichen getrennte Schlüsselwörter
+aur_ssh.args.hint_many_generic: durch Leerzeichen getrennte Argumente
+aur_ssh.cmd.adopt.desc: Ein verwaistes Paket übernehmen, das Sie pflegen möchten.
+aur_ssh.cmd.adopt.title: Adoptieren (Waise → ich)
+aur_ssh.cmd.disown.desc: Ihre Maintainer-Rolle für ein Paket abgeben.
+aur_ssh.cmd.disown.title: Abgeben (disown)
+aur_ssh.cmd.flag.desc: Paket mit optionalem Grund als veraltet markieren.
+aur_ssh.cmd.flag.title: Als veraltet markieren
+aur_ssh.cmd.help.desc: Zeigt die eingebaute Hilfe des Servers.
+aur_ssh.cmd.help.title: Hilfe — verfügbare Befehle auflisten
+aur_ssh.cmd.list_repos.desc: Listet jedes AUR-Git-Repository auf, für das Ihr Schlüssel Push-Rechte hat.
+aur_ssh.cmd.list_repos.title: Meine AUR-Repositories auflisten
+aur_ssh.cmd.notify.desc: Benachrichtigungen zu Paket-Updates und Kommentaren erhalten.
+aur_ssh.cmd.notify.title: Benachrichtigungen aktivieren
+aur_ssh.cmd.set_comaintainers.desc: Co-Maintainer-Liste ersetzen. Benutzernamen, durch Leerzeichen getrennt.
+aur_ssh.cmd.set_comaintainers.title: Co-Maintainer setzen
+aur_ssh.cmd.set_keywords.desc: Paket-Schlüsselwörter ersetzen. Durch Leerzeichen getrennt.
+aur_ssh.cmd.set_keywords.title: Schlüsselwörter setzen
+aur_ssh.cmd.setup_repo.desc: Leeres AUR-Git-Repository anlegen. Erstmalige Paket-Registrierung.
+aur_ssh.cmd.setup_repo.title: Leeres AUR-Repository anlegen
+aur_ssh.cmd.unflag.desc: Ihre gesetzte Veraltet-Markierung aufheben.
+aur_ssh.cmd.unflag.title: Markierung aufheben (Veraltet löschen)
+aur_ssh.cmd.unnotify.desc: Benachrichtigungen für dieses Paket beenden.
+aur_ssh.cmd.unnotify.title: Benachrichtigungen deaktivieren
+aur_ssh.cmd.unvote.desc: Ihre Abstimmung für ein Paket entfernen.
+aur_ssh.cmd.unvote.title: Abstimmung zurücknehmen
+aur_ssh.cmd.vote.desc: Für ein Paket abstimmen.
+aur_ssh.cmd.vote.title: Abstimmen
+build.btn: Bauen
+build.continue_publish: Weiter zu „Veröffentlichen“
+build.error_status: 'Fehler: {err}'
+build.heading: Bauen — {title}
+build.hint: Führt `makepkg -f` im Paketverzeichnis aus. Diese Anwendung niemals als root ausführen.
+build.log_sub: Live-stdout und -stderr von makepkg erscheinen unten, sobald Sie auf Bauen klicken.
+build.log_title: Build-Protokoll
+build.makepkg_exit: makepkg beendet mit {status}
+build.option_clean: Build-Baum nach Erfolg aufräumen (--clean)
+build.option_nobuild: Nur vorbereiten (--nobuild)
+build.status_building: baue…
+build.status_succeeded: Build erfolgreich
+build.toast_done: Build abgeschlossen
+build.toast_error: Build-Fehler
+build.toast_failed: Build fehlgeschlagen
+build.toast_no_pkg: Wählen Sie zuerst ein Paket auf der Startseite, bevor Sie bauen.
+build.toast_root: Build als root wird verweigert.
+connection.account_section: AUR-Konto
+connection.account_section_desc: Derselbe Login wie auf aur.archlinux.org. Wird für „Vom AUR-Konto importieren“, RPC-Abfragen
+  und das Öffnen Ihres Profils beim Einfügen von SSH-Schlüsseln genutzt. Speichern mit Übernehmen (✓) — zuerst wird das AUR
+  abgefragt und registrierte Pakete gegen Ihre Maintainer-/Co-Maintainer-Liste geprüft.
+connection.aur_section: AUR Archlinux
+connection.aur_section_desc: aur.archlinux.org — Eine erfolgreiche Prüfung bedeutet, dass Ihr SSH-Schlüssel beim AUR registriert ist.
+connection.browse: Durchsuchen…
+connection.choose_ssh_key: SSH-Privatschlüssel wählen
+connection.choose_workdir: Arbeitsverzeichnis wählen
+connection.continue: Weiter
+connection.continue_tooltip: SSH-Verifizierung ist nur für den Schritt „Veröffentlichen“ erforderlich.
+connection.devtools_subtitle: /usr/share/devtools
+connection.devtools_title: devtools-Dateien
+connection.heading: SSH-Zugang zum AUR prüfen
+connection.makepkg_conf_title: makepkg.conf
+connection.open: Öffnen
+connection.open_setup: Einrichtung öffnen
+connection.packaging_section: Paketierungskonfiguration
+connection.packaging_section_desc: Öffnet feste Systempfade mit der GTK-Standardanwendung. Wenn nichts passiert, legen Sie
+  einen Standardhandler für `.conf`-Dateien oder Ordner fest.
+connection.page_title: AUR-Verbindung
+connection.paths_section: Pfade
+connection.recommended_section: Empfohlene Umgebung
+connection.recommended_section_desc: 'Nicht nötig zum Starten der App, aber übliche Maintainer-Praxis: `base-devel` für
+  eine vollständige Toolchain, `fakeroot` für lokale `makepkg --fakeroot`-Prüfungen und `devtools` für saubere Chroot-Builds
+  (fehlende Host-Bibliotheken fallen so vor dem Push auf). Typischer Chroot-Zustand unter `/var/lib/archbuild` nach dem ersten
+  Root. https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot'
+connection.run_test: Test ausführen
+connection.setup_ssh_subtitle: Schlüssel wählen, öffentliche Hälfte kopieren, AUR-Kontoseite öffnen.
+connection.setup_ssh_title: SSH einrichten
+connection.ssh_key_title: SSH-Schlüssel (optionaler Override)
+connection.subtitle: Ihr AUR-Benutzername identifiziert Sie für Paketabfragen; Ihr SSH-Schlüssel belegt das Konto beim Push.
+  Benutzername unter AUR-Konto bearbeiten, dann Übernehmen (✓) zum Speichern und Verifizieren. Werkzeuge, Schlüssel und
+  Arbeitsverzeichnis vor dem ersten Build bereitstellen.
+connection.test_ssh_subtitle: ssh -T aur@aur.archlinux.org
+connection.test_ssh_title: SSH-Verbindung testen
+connection.toast_file_picker: Dateiauswahl konnte nicht geöffnet werden.
+connection.toast_folder_picker: Ordnerauswahl konnte nicht geöffnet werden.
+connection.toast_no_parent_window: Kein Elternfenster zum Öffnen des Pfads gefunden.
+connection.toast_open_path_failed: '{path} konnte nicht geöffnet werden: {err}'
+connection.tool_row.detail_hint: '{detail} — {hint}'
+connection.tool_row.missing: 'fehlt — installieren: {hint}'
+connection.tool_row.purpose_path: '{purpose} — nutzt `{via}`'
+connection.tools_section: Erforderliche Werkzeuge
+connection.tools_section_desc: Müssen in PATH liegen. Fehlende Pakete installieren Sie aus den offiziellen Repos.
+connection.unmatched_more: '{head} … (+{more} weitere)'
+connection.username_cleared_short: Benutzername gelöscht.
+connection.username_cleared_with_packages: Benutzername gelöscht. {n} Paket(e) verbleiben — speichern Sie erneut einen
+  Benutzernamen, um sie auf dem AUR zu prüfen.
+connection.username_saved_all: Benutzername gespeichert. Alle {registered} registrierten Pakete passen zu diesem Konto
+  ({aur} aus AUR-RPC, Maintainer oder Co-Maintainer).
+connection.username_saved_partial: 'Benutzername gespeichert. {k} Paket(e) sind für dieses Konto auf dem AUR nicht gelistet
+  (Maintainer-/Co-Maintainer-RPC): {list}'
+connection.username_title: AUR-Benutzername
+connection.username_verify_failed: 'Benutzername konnte nicht verifiziert werden — nicht gespeichert: {e}'
+connection.workdir_title: Arbeitsverzeichnis
+home.action.clone: Klonen / Assistent öffnen
+home.action.edit: Paket bearbeiten
+home.action.edit_tooltip: Bearbeiten
+home.action.remove: Aus Registry entfernen
+home.action.remove_tooltip: Entfernen
+home.add_favorite: Zu Favoriten hinzufügen
+home.add_package: Paket hinzufügen…
+home.add_package_help_body: '„Paket hinzufügen…“ öffnet den Paketeditor, um den lokalen Registry-Eintrag zu ändern oder
+  anzulegen: pkgbase-ID, PKGBUILD-Download-URL, Paketart sowie optionale Sync- oder Zielordner.
+
+
+  Das legt das Git-Repository auf dem AUR nicht selbst an — dafür dient „Neues AUR-Paket registrieren“, sobald dieser Ablauf
+  fertig ist.
+
+
+  Existieren Ihre Pakete schon auf dem AUR, kann „Vom AUR-Konto importieren…“ mehrere Zeilen auf einmal anlegen. Nutzen Sie
+  „Paket hinzufügen…“, wenn der Import nichts liefert, Sie eine neue pkgbase vor dem AUR-Eintritt vorbereiten oder eigene
+  Pfade und Titel brauchen.'
+home.add_package_help_tooltip: Was macht „Paket hinzufügen…“?
+home.dialog_remove_mismatch_body: 'Es werden nur lokale Registry-Einträge entfernt (nicht das AUR). Pakete: {packages}'
+home.dialog_remove_mismatch_title: Nicht passende Pakete entfernen?
+home.dialog_remove_title: Nicht passende Pakete entfernen?
+home.dialog_response_cancel: _Abbrechen
+home.dialog_response_remove: _Entfernen
+home.empty_no_match_sub: Suche oder Filter anpassen.
+home.empty_no_match_title: Keine passenden Pakete
+home.empty_no_packages_sub: Unten auf „Paket hinzufügen…“ klicken, um eines zu registrieren.
+home.empty_no_packages_title: Noch keine Pakete
+home.empty_sub: Paket hinzufügen oder vom AUR-Konto importieren.
+home.empty_title: Noch keine Pakete
+home.favorite_tooltip: Favorit — oben auch unter Favoriten gelistet
+home.filter.all: Alle Pakete
+home.filter.flagged: Nur markierte
+home.filter.not_flagged: Nicht markierte
+home.footer_tip: 'Tipp: „Neues AUR-Paket registrieren“ für den ersten pkgbase-Push; „Veröffentlichen“, wenn das AUR-Repo
+  schon existiert. Nach dem Speichern Ihres Benutzernamens auf dem Tab „AUR-Verbindung“ sind rote Zeilen in der letzten
+  RPC-Prüfung nicht für diesen Login als Maintainer oder Co-Maintainer gelistet.'
+home.heading: Wählen Sie ein Paket zur Pflege
+home.import_account_dots: Vom AUR-Konto importieren…
+home.last_updated.days_ago: vor {n} Tagen
+home.last_updated.hours_ago: vor {n} h
+home.last_updated.just_now: gerade eben
+home.last_updated.min_ago: vor {n} Min.
+home.last_updated.never: 'Zuletzt aktualisiert: nie — Sync oder Version → Neu laden ausführen, um es zu protokollieren.'
+home.last_updated.prefix: 'Zuletzt aktualisiert: {detail}'
+home.last_updated.unknown_date: unbekanntes Datum
+home.manage_packages_dots: Pakete verwalten…
+home.open_manage: Pakete verwalten
+home.open_onboarding: Vom AUR-Konto importieren
+home.page_title: Startseite
+home.register_aur: Neues AUR-Paket registrieren
+home.register_aur_tooltip: 'Registrierungsassistent öffnen: neue pkgbase definieren, validieren und pushen, um das AUR-Git-Repository
+  anzulegen.'
+home.remove_confirm_body: Entfernt „{id}“ aus der lokalen Liste. Dateien auf der Platte werden nicht gelöscht.
+home.remove_confirm_cancel: Abbrechen
+home.remove_confirm_remove: Entfernen
+home.remove_confirm_title: Aus Registry entfernen?
+home.remove_favorite: Aus Favoriten entfernen
+home.remove_mismatch: Nicht passende entfernen…
+home.remove_mismatch_empty_toast: Keine nicht passenden Pakete zum Entfernen — zuerst „Übernehmen“ beim Benutzernamen auf
+  dem Tab „AUR-Verbindung“ ausführen, oder es sind keine registriert.
+home.remove_mismatch_tooltip: Entfernt rot markierte Pakete — in der letzten Verbindungs-Prüfung nicht für Ihren gespeicherten
+  AUR-Benutzernamen als Maintainer oder Co-Maintainer gelistet.
+home.row.error_tooltip: Dieses Paket ist für Ihren gespeicherten AUR-Benutzernamen nicht gelistet (Maintainer-/Co-Maintainer-RPC).
+  Verbindung → AUR-Konto öffnen und beheben.
+home.row.mismatch_tooltip: In der letzten RPC-Prüfung nicht für Ihren gespeicherten AUR-Benutzernamen als Maintainer oder
+  Co-Maintainer gelistet. AUR-Verbindung → Benutzername erneut übernehmen zum Nachprüfen.
+home.row.not_on_aur_sub: Verbindung öffnen und Benutzername prüfen, oder diesen Eintrag entfernen.
+home.row.not_on_aur_title: Nicht auf Ihrem AUR-Konto
+home.search_placeholder: Pakete suchen…
+home.section.all_packages: Alle Pakete
+home.section.favorites: Favoriten
+home.section.packages: Pakete
+home.show_title: Anzeigen
+home.sort.kind: Art
+home.sort.name_asc: Name (A–Z)
+home.sort.name_desc: Name (Z–A)
+home.sort.refresh_newest: Zuletzt aktualisiert (neueste)
+home.sort.refresh_oldest: Zuletzt aktualisiert (älteste)
+home.sort_title: Sortierung
+home.subtitle: PKGBUILD aus der Upstream-Quelle synchronisieren, lokal mit makepkg bauen und zum AUR pushen. Pakete hinzufügen
+  oder die AUR-Registrierung über die Schaltflächen unten starten.
+home.toast_dialog_open_fail: Bestätigungsdialog konnte nicht geöffnet werden.
+home.toast_pkg_added: '{id} hinzugefügt'
+home.toast_pkg_updated: '{id} aktualisiert'
+home.toast_remove_cancelled: Entfernen abgebrochen.
+home.toast_removed_n: '{n} Paket(e) aus der lokalen Registry entfernt.'
+manage.all_match_toast: 'Alle {n} Paket(e): PKGBUILD auf der Platte entspricht Upstream (unter Ihrem Arbeitsverzeichnis).
+  Nur die Konfiguration zu löschen entfernt diese Dateien nicht — Sync erneut ausführen oder ein frisches Arbeitsverzeichnis,
+  wenn Sie leere Bäume erwartet haben.'
+manage.aur_ssh_section: AUR-SSH-Befehle
+manage.aur_ssh_section_desc: Kuratierte Auswahl für Befehle, die aur@aur.archlinux.org akzeptiert — voten, flaggen, adoptieren,
+  disown, list-repos und mehr.
+manage.bulk_download_btn: '{n} fehlende PKGBUILD(s) herunterladen'
+manage.bulk_download_fail: PKGBUILD für {n_fail} Paket(e) konnte nicht heruntergeladen werden. Pro Paket „Sync“ für Details nutzen.
+manage.bulk_download_ok: PKGBUILD für {n_ok} Paket(e) heruntergeladen.
+manage.bulk_download_partial: '{n_ok} PKGBUILD(s) heruntergeladen; {n_fail} fehlgeschlagen — „Sync“ oder Paket bearbeiten für
+  fehlgeschlagene Zeilen.'
+manage.bulk_download_tooltip: 'Wie Sync: jede PKGBUILD-URL des Pakets in sein Arbeitsverzeichnis holen.'
+manage.check_all: Alle prüfen
+manage.check_all_sub: Holt jede PKGBUILD-URL aus der Registry und vergleicht sie mit dem PKGBUILD auf der Platte unter Ihrem
+  Arbeitsverzeichnis (oder paket-spezifischem Ziel). Konfiguration löschen löscht keine Dateien — für einen sauberen Baum
+  „Sync“ nutzen oder alte Ordner entfernen.
+manage.check_all_title: Alle Pakete auf Upstream-Updates prüfen
+manage.close: Schließen
+manage.coming_soon: 'Demnächst: {what}'
+manage.empty_registry_sub: Auf der Startseite „Paket hinzufügen…“ nutzen, um eines zu registrieren.
+manage.empty_registry_title: Keine Pakete in der Registry
+manage.failed: 'Fehlgeschlagen: {e}'
+manage.heading: AUR-Pakete verwalten
+manage.import_dots: Import…
+manage.import_row_sub: AUR-Paket nach Namen klonen und Registry-Eintrag vorausfüllen.
+manage.import_row_title: Aus bestehendem AUR-Repo importieren
+manage.imported: '{id} importiert'
+manage.lang_label_de: Deutsch
+manage.lang_label_en: Englisch
+manage.lang_toast_de: Deutsche Oberfläche aktiv.
+manage.lang_toast_en: Englische Oberfläche aktiv.
+manage.language_row_sub: In der Konfigurationsdatei gespeichert; Reitertitel werden sofort aktualisiert.
+manage.language_row_title: Anzeigesprache
+manage.language_section: Sprache
+manage.language_section_desc: Zwischen Englisch und Deutsch für die Oberfläche wechseln.
+manage.lifecycle: Lebenszyklus
+manage.lifecycle_desc: Vorgänge, die ein ganzes AUR-Repository betreffen.
+manage.menu.archive_preview: Archivieren / disown (Vorschau)
+manage.menu.check_upstream: Upstream-PKGBUILD prüfen
+manage.menu.open_dir: Arbeitsverzeichnis öffnen
+manage.menu.open_wizard: Build-Assistent öffnen
+manage.no_packages_registry: Keine Pakete in der Registry.
+manage.no_pkgbuild_url: Keine PKGBUILD-URL — unter „Paket bearbeiten“ ergänzen.
+manage.ok_archived: Archiviert
+manage.ok_opened: Geöffnet
+manage.open: Öffnen
+manage.open_ssh_commands: SSH-Befehle öffnen
+manage.open_ssh_commands_sub: Nutzt den auf dem Verbindungsbildschirm konfigurierten SSH-Schlüssel.
+manage.packages_section: Pakete
+manage.packages_section_desc: Admin-Aktionen pro Paket.
+manage.page_title: Pakete verwalten
+manage.pkg_err_toast: '{pkg}: {err}'
+manage.preview: Vorschau
+manage.prompt_import_title: AUR-Paket importieren
+manage.render_admin_err: '{label}: {err}'
+manage.render_admin_ok: '{label}: OK'
+manage.subtitle: Bestehende AUR-Repositories importieren und auf Upstream-Updates prüfen. „Neues AUR-Paket registrieren“ liegt
+  auf der Startseite. Als „Vorschau“ markierte Lebenszyklus-Aktionen sind Platzhalter und kommen in einer späteren Version.
+manage.upstream_ok_toast: '{pkg}: PKGBUILD auf der Platte entspricht Upstream (pkgver {version}).'
+manage.upstream_title_diff: Upstream-Prüfung — Diff prüfen
+manage.upstream_title_report: Upstream-Prüfung — Bericht
+manage.upstream_toast: Ein oder mehrere Pakete weichen vom Upstream ab oder sind fehlgeschlagen — siehe Berichtsfenster.
+manage.upstream_window_title: '{pkg} — PKGBUILD vs. Upstream'
+manage.upstream_diff_body: |-
+  pkgver: {local} (lokal) → {upstream} (Upstream)
+
+  Diff (gleicher Stil wie „Veröffentlichen“ — „Diff vs. HEAD“):
+
+  {diff}
+manage.bulk_report_col_package: Paket
+manage.bulk_report_col_status: Status
+manage.bulk_report_col_details: Details
+manage.bulk_report_status_up_to_date: aktuell
+manage.bulk_report_status_outdated: veraltet
+manage.bulk_report_status_preview: Vorschau
+manage.bulk_report_status_error: Fehler
+manage.bulk_report_pkgver: 'pkgver {version}'
+manage.bulk_report_pkgver_cmp: 'pkgver: {local} (lokal) → {upstream} (Upstream)'
+manage.bulk_report_diff_heading: |-
+  === {id} (PKGBUILD vs. Upstream) ===
+
+  {diff}
+manage.workdir_required_toast: Zuerst ein Arbeitsverzeichnis setzen.
+onboarding.empty_row_subtitle: Oben Benutzernamen eingeben und „Abrufen“ klicken.
+onboarding.empty_row_title: Noch nichts abgerufen
+onboarding.fetch_button: Abrufen
+onboarding.fetch_row_subtitle: Fragt das AUR nach Paketen, die Sie besitzen oder mitpflegen.
+onboarding.fetch_row_title: Gepflegte Pakete abrufen
+onboarding.heading: Mit AUR-Benutzername anmelden
+onboarding.import_continue: Importieren und mit SSH fortfahren
+onboarding.no_description: (keine Beschreibung)
+onboarding.no_packages_row_subtitle: Benutzername prüfen oder zuerst ein Paket auf dem AUR registrieren.
+onboarding.no_packages_row_title: Keine Pakete gefunden
+onboarding.ood_tooltip: Auf dem AUR als veraltet markiert
+onboarding.page_title: Einstieg
+onboarding.results_desc: Pakete markieren, die Sie von hier aus verwalten möchten.
+onboarding.results_title: Ihre Pakete
+onboarding.section_login: Anmeldung
+onboarding.section_login_desc: Es wird kein Passwort ausgetauscht. Der SSH-Schlüssel wird separat auf dem Tab „AUR-Verbindung“
+  eingerichtet — damit werden Pushes authentifiziert. Brandneue AUR-Konten können manuell gegen Spam geprüft werden; wenn
+  die Website-Anmeldung fehlschlägt, auf Freigabe warten, bevor Sie SSH-Schlüssel einfügen.
+onboarding.skip: Einrichtung überspringen
+onboarding.skip_tooltip: Überspringt Paketimport und SSH-Einrichtung. Beides können Sie später von der Startseite erneut öffnen.
+onboarding.subtitle: Hier ist nur Ihr aur.archlinux.org-Benutzername — der öffentliche AUR-RPC listet damit, was Sie pflegen.
+  Beim späteren Release-Push verifiziert Ihr SSH-Schlüssel Sie.
+onboarding.toast_aur_said: 'AUR meldet: {msg}'
+onboarding.toast_enter_username: Zuerst AUR-Benutzernamen eingeben.
+onboarding.toast_fetch_failed: 'Abrufen fehlgeschlagen: {err}'
+onboarding.toast_found_n: '{n} Paket(e) gefunden'
+onboarding.toast_imported_n: '{n} Paket(e) importiert'
+onboarding.toast_no_packages: Für diesen Benutzer keine Pakete gefunden
+onboarding.toast_select_one: Mindestens ein Paket auswählen.
+onboarding.username_title: AUR-Benutzername
+package.hint.bin_suffix: 'AUR-Konvention: Bei Art „Binär“ endet die pkgbase üblicherweise auf „-bin“. Speichern ist trotzdem
+  möglich — nur ein Hinweis.'
+package.hint.git_suffix: 'AUR-Konvention: Bei Art „Git“ endet die pkgbase üblicherweise auf „-git“. Speichern ist trotzdem
+  möglich — nur ein Hinweis.'
+package.kind.bin: Binär
+package.kind.git: Git
+package.kind.other: Quelle
+package.stale.never_recorded: Für dieses Paket ist noch kein PKGBUILD-Download oder „Neu laden von der Platte“ protokolliert.
+  Vor Vertrauen in diesen Baum „Sync“ oder „Neu laden“ nutzen.
+package.stale.old: Das PKGBUILD wurde zuletzt vor über einem Tag heruntergeladen oder von der Platte neu geladen. „Sync“ oder
+  „Neu laden“, damit Sie keine veraltete Datei bearbeiten.
+package_editor.name_found_aur: Paket auf dem AUR gefunden
+package_editor.name_on_aur: Name bereits auf dem AUR
+package_editor.name_unavailable: Name nicht verfügbar
+package_editor.optional_detail: Optional — {detail}
+package_editor.window.edit: Paket bearbeiten
+package_editor.window.define_aur: Paket für AUR definieren
+package_editor.window.add: Paket hinzufügen
+package_editor.cancel: Abbrechen
+package_editor.save: Speichern
+package_editor.pkgbase_field_hint: 'Verwenden Sie die pkgbase (AUR-Repository-Name), nicht einen geteilten pkgname. Beispiel: my-pkg-bin.'
+package_editor.field.pkgbase_new: AUR-pkgbase (Repository-Name) *
+package_editor.field.pkgbase_edit: AUR-pkgbase (Repository-Name)
+package_editor.field.title: Anzeigetitel — nur App (nicht PKGBUILD oder AUR); leer lässt die pkgbase gelten
+package_editor.field.subtitle: Kurzbeschreibung — nur App; optionale zweite Zeile auf der Startseite
+package_editor.favorite_title: Favorit auf der Startseite
+package_editor.favorite_sub: Paket oben unter Favoriten listen (Rechtsklick funktioniert auch).
+package_editor.field.url_new: PKGBUILD-URL (roh) *
+package_editor.field.url_edit: PKGBUILD-URL (roh)
+package_editor.url_tooltip: Rohe PKGBUILD-Datei-URL für den Tab „Sync“. Für neue Registrierung optional — später unter
+  „Paket bearbeiten“ ergänzen.
+package_editor.dest_title: Ziel (PKGBUILD-Pfad)
+package_editor.browse: Durchsuchen…
+package_editor.use_default: Standard verwenden
+package_editor.icon_title: Symbolname — nur App; optionales freedesktop-Symbol (leer → Art wählt)
+package_editor.kind_title: Art
+package_editor.kind_sub: Nur App; Standardlisten-Symbol wenn Symbolname leer. Ändert makepkg nicht.
+package_editor.section_package: Paket
+package_editor.blurb_register: 'Pflichtfelder sind mit * markiert. pkgbase und Speicherort des PKGBUILD auf der Platte setzen.
+  Nach dem Speichern zum Registrierungs-Assistenten zurück, validieren und pushen — das legt das AUR-Git-Repository an. Eine
+  Upstream-PKGBUILD-URL können Sie später unter „Paket bearbeiten“ ergänzen, wenn Sie Sync nutzen.'
+package_editor.blurb_new: 'Pflichtfelder sind mit * markiert. Wenn die pkgbase steht, „Veröffentlichen“ nutzen, um das
+  AUR-Repository zu klonen (falls nötig) und zu pushen; es gibt keine separate Freigabeschlange. Eine erste Git-Warnung über ein
+  leeres Repository ist normal bis zum ersten akzeptierten Push.'
+package_editor.blurb_edit: Pflichtfelder sind mit * markiert. Anzeigetitel, Kurzbeschreibung und Symbolname sind nur in der App
+  (nicht PKGBUILD oder AUR); Anzeigetitel leer lassen, um die pkgbase zu verwenden.
+pkgbuild_editor.banner_no_home_pkg: Auf der Startseite ist kein Paket ausgewählt.
+pkgbuild_editor.btn_apply: Schnellfelder anwenden
+pkgbuild_editor.btn_reload: Neu laden
+pkgbuild_editor.btn_save: Speichern
+pkgbuild_editor.btn_srcinfo: .SRCINFO
+pkgbuild_editor.diff_more_removed: … (weitere entfernte Zeilen nicht angezeigt)
+pkgbuild_editor.field.arch: arch — durch Leerzeichen getrennte Tokens → Array
+pkgbuild_editor.field.conflicts: conflicts — durch Leerzeichen getrennt
+pkgbuild_editor.field.depends: depends — Paketnamen, durch Leerzeichen getrennt
+pkgbuild_editor.field.license: license — durch Leerzeichen getrennt → Array
+pkgbuild_editor.field.maintainer: Maintainer — # Maintainer: … (Name <E-Mail>)
+pkgbuild_editor.field.makedepends: makedepends — Build-Abhängigkeiten, durch Leerzeichen getrennt
+pkgbuild_editor.field.optdepends: optdepends — optionale Abhängigkeiten (mehrwortige Gründe im Textfeld)
+pkgbuild_editor.field.pkgdesc: pkgdesc — Beschreibung (bei Bedarf automatisch in Anführungszeichen)
+pkgbuild_editor.field.pkgname: pkgname — sollte zur AUR-ID „{id}“ passen
+pkgbuild_editor.field.pkgrel: pkgrel — Release-Ganzzahl
+pkgbuild_editor.field.pkgver: pkgver — Upstream-Version
+pkgbuild_editor.field.provides: provides — durch Leerzeichen getrennt
+pkgbuild_editor.field.source: source — einzeilige Tokens; lange URLs im Textfeld
+pkgbuild_editor.field.url: url — Upstream-/Projekt-URL
+pkgbuild_editor.full_label: Vollständiges PKGBUILD (prepare, build, check, package, …)
+pkgbuild_editor.no_pkg_banner: Zielordner auf dem Tab „Sync“ wählen oder Arbeitsverzeichnis unter „Verbindung“ setzen.
+pkgbuild_editor.path_row_title: PKGBUILD-Pfad
+pkgbuild_editor.quick_subtitle: Durch Leerzeichen getrennte Tokens werden zu Bash-Arrays. Funktionen im Textfeld bearbeiten.
+pkgbuild_editor.quick_title: Schnellmetadaten
+pkgbuild_editor.removed_caption: Entfernte Zeilen gegenüber letztem Laden/Speichern (wie git −)
+pkgbuild_editor.section_desc: Neu laden liest die Datei vom Datenträger. Speichern schreibt den Puffer. „Schnellfelder
+  anwenden“ führt die Zeilen oben in den vollständigen Text ein (nur einzeilige Zuweisungen — danach Puffer prüfen).
+  Funktionen wie prepare(), build() und package() im Volltext bearbeiten. Grüne Markierungen zeigen neue Zeilen; entfernte
+  Zeilen erscheinen im roten Bereich.
+pkgbuild_editor.section_subtitle_need_pkg: Wählen Sie auf der Startseite ein Paket für diesen Editor.
+pkgbuild_editor.section_title: PKGBUILD bearbeiten
+pkgbuild_editor.srcinfo_tooltip: makepkg --printsrcinfo in diesem Verzeichnis ausführen (nach Speichern).
+pkgbuild_editor.stub_hint_register: '# Noch kein PKGBUILD auf der Platte — „Starter-PKGBUILD erstellen“ auf der Seite
+  „Registrieren“ nutzen oder hier einfügen und speichern.'
+pkgbuild_editor.stub_hint_version: '# Noch kein PKGBUILD auf der Platte — Tab „Sync“ zum Herunterladen nutzen oder hier
+  einfügen und speichern.'
+pkgbuild_editor.stub_no_dir: '# Zielordner auf dem Tab „Sync“ wählen oder Arbeitsverzeichnis unter „Verbindung“ setzen.'
+pkgbuild_editor.toast_loaded: PKGBUILD geladen
+pkgbuild_editor.toast_merge_quick: Schnellfelder in den Editor übernommen — Volltext prüfen, dann speichern.
+pkgbuild_editor.toast_no_path: Für dieses Paket ist kein PKGBUILD-Pfad konfiguriert.
+pkgbuild_editor.toast_no_pkg: Für diesen Editor ist kein Paket verfügbar.
+pkgbuild_editor.toast_no_pkgbuild_disk: Noch kein PKGBUILD auf der Platte
+pkgbuild_editor.toast_reload_hint: Nach externen Änderungen Neu laden verwenden.
+pkgbuild_editor.toast_saved: PKGBUILD gespeichert
+pkgbuild_editor.toast_set_workdir: Arbeitsverzeichnis unter „Verbindung“ setzen oder Zielordner auf „Sync“ wählen.
+pkgbuild_editor.toast_srcinfo_fail: '.SRCINFO fehlgeschlagen: {e}'
+pkgbuild_editor.toast_wrote: Geschrieben {path}
+preflight.rows.base-devel.install_hint: pacman -S --needed base-devel
+preflight.rows.base-devel.purpose: Meta-Paketgruppe für Paketierung auf diesem System
+preflight.rows.devtools.install_hint: pacman -S --needed devtools
+preflight.rows.devtools.purpose: saubere Chroot-Builds (empfohlen vor dem Push zum AUR)
+preflight.rows.fakeroot.install_hint: pacman -S --needed base-devel
+preflight.rows.fakeroot.purpose: makepkg --fakeroot / Paketierungsprüfungen (in base-devel enthalten)
+preflight.rows.git.install_hint: pacman -S --needed git
+preflight.rows.git.purpose: AUR-Repository klonen und pushen
+preflight.rows.makepkg.install_hint: pacman -S --needed base-devel
+preflight.rows.makepkg.purpose: Arch-Pakete bauen
+preflight.rows.ssh.install_hint: pacman -S --needed openssh
+preflight.rows.ssh.purpose: Verbindung zu aur.archlinux.org
+preflight.rows.updpkgsums.install_hint: pacman -S --needed pacman-contrib
+preflight.rows.updpkgsums.purpose: sha256sums im PKGBUILD aktualisieren
+publish.page_title: Veröffentlichen
+publish.heading: 'Veröffentlichen — {title}'
+publish.subtitle: '„Vorbereiten“ klont (oder nutzt erneut) das AUR-Git-Repository unter {url}. Bei einer neuen pkgbase kann Git
+  warnen, dass ein leeres Repository geklont wurde — das ist erwartbar, bis der Server den ersten Push annimmt (siehe Arch-Wiki
+  AUR-Einreichung).
+
+
+  „Vorbereiten“ führt dieselbe Validierung und .SRCINFO-Neuerzeugung wie „Registrieren“ aus, klont (oder nutzt) das AUR-Repo,
+  stagiert PKGBUILD und .SRCINFO aus Ihrem Sync-Verzeichnis in diesen Klon, zeigt den Diff, danach können Sie committen und
+  pushen.'
+publish.expectations_title: Was beim Veröffentlichen gilt
+publish.expectations_sub: 'Das AUR wird vor Veröffentlichung nicht moderiert: Nach erfolgreichem Push sind die Quellen
+  öffentlich. Rückfragen in Foren oder auf Mailinglisten sind bei Unsicherheit sinnvoll, aber freiwillig und ersetzen keine
+  eigenen Prüfungen vor dem Push.'
+publish.banner_ssh_title: 'SSH ist noch nicht verifiziert. Sie können das PKGBUILD bearbeiten, lokal bauen und .SRCINFO
+  neu erzeugen, aber Commit und Push sind deaktiviert.'
+publish.commit_message_row_title: Commit-Nachricht
+publish.default_template_row_title: Standardvorlage
+publish.default_desc_builtin: '{template}   (eingebaute Standardvorlage)'
+publish.default_desc_saved: '{template}   (Ihre gespeicherte Vorlage)'
+publish.save_default_btn: Als Standard speichern
+publish.reset_default_btn: Auf Standard zurücksetzen
+publish.commit_section_title: Commit-Nachricht
+publish.commit_section_sub: 'Vorausgefüllt aus Ihrer Standardvorlage ({pkg} für den Paketnamen). Hier nur diesen Commit
+  anpassen oder „Als Standard speichern“, um die Vorlage für künftige Commits zu ändern.'
+publish.stage_btn: Vorbereiten (Validieren + Klonen + .SRCINFO + Diff)
+publish.stage_tooltip_no_ssh: Zuerst SSH einrichten und verifizieren.
+publish.stage_tooltip_ok: 'Führt erforderliche Validierung und .SRCINFO-Neuerzeugung aus, klont bei Bedarf das AUR-Repo
+  (Leer-Repo-Warnung beim ersten Klon ist bei neuer pkgbase normal), stagiert Dateien und zeigt den Diff.'
+publish.push_btn: Committen und pushen
+publish.push_tooltip_no_ssh: Zuerst SSH einrichten und verifizieren.
+publish.push_tooltip_ok: 'Nach „Vorbereiten“: committet PKGBUILD + .SRCINFO und pusht zum AUR. Ein erfolgreicher Push
+  veröffentlicht sofort — es gibt keinen separaten Freigabeschritt. Nur aktiv, wenn sich der Klon von HEAD unterscheidet.'
+publish.diff_heading: Diff zu HEAD
+publish.log_title: Veröffentlichen-Protokoll
+publish.log_subtitle: git status, Diff, Commit und Push erscheinen hier als Ausgabe der Aktionen oben.
+publish.toast_could_not_resolve_dir: Paketverzeichnis konnte nicht aufgelöst werden — Sync-Ziel oder Verbindung prüfen.
+publish.toast_default_saved: Standard-Commit-Nachricht gespeichert
+publish.toast_enter_message: Vor dem Speichern eine Nachricht eingeben.
+publish.toast_git_init_hint: Git-Repository fehlt oder ist leer — zuerst Registrieren oder Sync nutzen.
+publish.toast_git_status_hint: git status fehlgeschlagen — Baum vor dem Push reparieren.
+publish.toast_no_changes_vs_aur: Keine Änderungen zum AUR — nichts zu committen oder zu pushen
+publish.toast_no_message: Commit-Nachricht eingeben.
+publish.toast_no_workdir: Kein Arbeitsverzeichnis konfiguriert.
+publish.toast_push_failed: 'Push fehlgeschlagen: {e}'
+publish.toast_push_ready: Bereit zum Pushen — Diff prüfen; Push veröffentlicht sofort
+publish.toast_pushed: Zum AUR gepusht — nach neuen Änderungen erneut „Vorbereiten“ ausführen
+publish.toast_reset_default: Auf Standard zurücksetzen
+publish.toast_save_config_failed: 'Konfiguration konnte nicht gespeichert werden: {e}'
+register.alert_push_body: Nach erfolgreichem Push werden PKGBUILD und .SRCINFO auf dem AUR öffentlich. Es gibt keinen
+  separaten Freigabeschritt. Nur bestätigen, wenn Sie veröffentlichen möchten.
+register.alert_push_title: Zum AUR pushen?
+register.banner_ssh_btn: SSH einrichten
+register.banner_ssh_title: SSH ist noch nicht verifiziert. Richten Sie SSH auf dem Tab „Verbindung“ ein, bevor Sie klonen
+  oder zum AUR pushen.
+register.btn_close: Schließen
+register.btn_define: Paket definieren…
+register.btn_edit: PKGBUILD bearbeiten…
+register.btn_edit_tooltip: 'Mit SSH: aktiv, wenn die Fernprüfung ein PKGBUILD im AUR-Git findet oder lokal eine Datei
+  existiert. Öffnet denselben Editor wie der Tab „Version“.'
+register.btn_prepare: Validieren, klonen und stagen
+register.btn_prepare_tooltip_no_ssh: Zuerst SSH einrichten und verifizieren (Klonen nutzt SSH).
+register.btn_prepare_tooltip_ssh: Führt Namensraumprüfungen, Validierung, .SRCINFO, Git-Klon und Staging in den AUR-Klon
+  aus. Push ist separat.
+register.btn_push: Committen und zum AUR pushen
+register.btn_push_tooltip_no_ssh: Zuerst SSH einrichten und verifizieren.
+register.btn_push_tooltip_ssh: Nach erfolgreichem Vorbereiten aktiv. Committet „Initial import“ und pusht — veröffentlicht
+  sofort.
+register.btn_starter: Starter-PKGBUILD erstellen
+register.btn_starter_tooltip: 'Mit SSH: nur aktiv, wenn die Fernprüfung kein PKGBUILD im AUR-Git findet. Sonst: aktiv, wenn
+  lokal kein PKGBUILD existiert. Schreibt ein minimales PKGBUILD und öffnet den Editor.'
+register.chk_history: Vorhandene Remote-Git-Historie erlauben (Wiederherstellung gelöschter pkgbase)
+register.chk_history_tooltip: Wenn das AUR-Git-Remote bereits Commits hat, vor dem Vorbereiten aktivieren, wenn Sie
+  fortfahren möchten. Änderungen nach erfolgreichem Vorbereiten setzen den Push-Schritt zurück, bis Sie erneut vorbereiten.
+register.editor_title: PKGBUILD bearbeiten — {id}
+register.heading: Neues AUR-Paket registrieren
+register.log_subtitle: 'Vorbereiten: Namensraum, Validierung, Klonen und Staging. Push: Commit- und Git-Ausgabe.'
+register.log_title: Registrierungsprotokoll
+register.nav_title: Registrieren
+register.response_push: _Committen und pushen
+register.row_package_subtitle: Registry-Zeile aus dem Editor anlegen oder überschreiben.
+register.row_package_title: Paket
+register.row_pkgbuild_subtitle: 'Mit SSH prüft die App das AUR-Git-Remote (flacher Klon), weil der dauerhafte Klon noch
+  nicht existiert — **Starter erstellen** nur ohne Remote-PKGBUILD; **Bearbeiten**, wenn eines existiert oder lokal eine
+  Datei liegt. Ohne SSH richten sich die Schaltflächen nur nach lokalen Dateien.'
+register.row_pkgbuild_title: PKGBUILD
+register.subtitle: pkgbase und Zielordner festlegen, dann bei fehlender Datei ein Starter-PKGBUILD erstellen und hier
+  bearbeiten (derselbe Editor wie auf dem Tab „Version“). Wenn bereit, validieren / klonen / stagen, dann committen und
+  pushen. Dieser Ablauf nutzt nicht die Auswahl auf der Startseite.
+register.summary_empty: Noch kein Paket definiert — „Paket definieren…“ verwenden.
+register.summary_ready: 'Bereit: {id} — {title}'
+register.toast_define_first: Bitte zuerst ein Paket definieren.
+register.toast_define_prepare: Bitte vor dem Vorbereiten ein Paket definieren.
+register.toast_define_push: Bitte vor dem Push ein Paket definieren.
+register.toast_editor_open: Editorfenster konnte nicht geöffnet werden.
+register.toast_gitinspect_fail: 'AUR-Git konnte nicht auf PKGBUILD geprüft werden: {err}'
+register.toast_no_confirm: Bestätigungsdialog konnte nicht geöffnet werden.
+register.toast_pick_dest: Zielordner wählen („Paket definieren…“), damit der PKGBUILD-Pfad bekannt ist.
+register.toast_prepare_before_push: Vor dem Push „Validieren, klonen und stagen“ erfolgreich ausführen.
+register.toast_prepare_done: Vorbereiten abgeschlossen — Protokoll prüfen, dann bei Bedarf committen und pushen.
+register.toast_registered: '{id} auf dem AUR registriert — Startseite für Veröffentlichen oder Validieren geöffnet.'
+register.toast_saved: '{id} in die lokale Registry gespeichert.'
+register.toast_starter_fail: 'Starter konnte nicht erstellt werden: {err}'
+register.toast_starter_skipped: PKGBUILD existiert bereits — kein Starter geschrieben. PKGBUILD bearbeiten oder Datei zuerst
+  löschen.
+register.toast_starter_wrote: Starter-PKGBUILD für {id} geschrieben — Editor geöffnet; bei Bedarf vorbereiten.
+register.toast_workdir_first: Zuerst ein Arbeitsverzeichnis auf dem Tab „Verbindung“ setzen.
+shell.connection_bad_tooltip: Es gibt etwas zu prüfen — Tab „Verbindung“ für Details und Hinweise öffnen
+shell.connection_ok_tooltip: Erforderliche Werkzeuge und AUR-SSH sehen gut aus
+shell.go_home: Zur Startseite
+shell.home_tab_0: Startseite – (0 Pakete)
+shell.home_tab_1: Startseite – (1 Paket)
+shell.home_tab_n: Startseite – ({n} Pakete)
+shell.pick_package_hint: Zuerst ein Paket auf der Startseite wählen.
+shell.root_page_title: AUR Builder
+shell.sync_tab_pkg: Sync – {pkg}
+shell.sync_tab_plain: Sync
+shell.tab.build: Bauen
+shell.tab.connection: Verbindung
+shell.tab.home: Startseite
+shell.tab.manage: Verwalten
+shell.tab.publish: Veröffentlichen
+shell.tab.sync: Sync
+shell.tab.validate: Validieren
+shell.tab.version: Version
+shell.validate_bad_tooltip: Erforderliche Validierung meldet Probleme — Tab „Validieren“ für Details öffnen
+shell.validate_ok_tooltip: Erforderliche Validierungsstufe bestanden
+shell.version_pkgver: Version – {v}
+shell.version_plain: Version
+ssh_setup.toast_generated_aur: ~/.ssh/aur erzeugt
+ssh_setup.toast_key_selected: SSH-Schlüssel für AUR gewählt
+ssh_setup.toast_known_hosts_added: AUR-Hostschlüssel zu known_hosts hinzugefügt
+ssh_setup.toast_known_hosts_trusted: AUR bereits in known_hosts vertrauenswürdig
+ssh_setup.toast_no_display_copy: Kein Display zum Kopieren
+ssh_setup.toast_opened_browser: Im Browser geöffnet
+ssh_setup.toast_opened_profile: AUR-Konto im Browser geöffnet
+ssh_setup.toast_opened_register: AUR-Registrierung im Browser geöffnet
+ssh_setup.toast_public_copied: Öffentlicher Schlüssel kopiert
+ssh_setup.toast_reused_aur: Bestehendes ~/.ssh/aur wiederverwendet
+ssh_setup.toast_select_key: Zuerst einen SSH-Schlüssel wählen.
+ssh_setup.toast_select_or_create_key: Zuerst einen SSH-Schlüssel wählen oder anlegen.
+ssh_setup.toast_ssh_config_created: ~/.ssh/config angelegt
+ssh_setup.toast_ssh_config_ok: ~/.ssh/config bereits korrekt
+ssh_setup.toast_ssh_config_updated: ~/.ssh/config aktualisiert
+ssh_setup.toast_username_cleared: Benutzername wurde geleert.
+ssh_setup.page_title: SSH-Einrichtung
+ssh_setup.heading: SSH-Verifizierung für das AUR einrichten
+ssh_setup.subtitle: ~/.ssh/aur anlegen (oder wiederverwenden), den passenden Host-Block in ~/.ssh/config schreiben und den
+  Hostschlüssel des Servers in ~/.ssh/known_hosts verankern.
+ssh_setup.keys_heading: Ihre SSH-Schlüssel
+ssh_setup.keys_desc: Unter ~/.ssh erkannt. „Für AUR verwenden“ klicken, um einen zu wählen.
+ssh_setup.one_click_section: Ein-Klick-Einrichtung
+ssh_setup.one_click_section_desc: Führt die drei Schritte unten nacheinander aus. Mehrfach klicken ist unkritisch — bestehende
+  Dateien werden wiederverwendet, nicht überschrieben.
+ssh_setup.one_click_row_title: Schlüssel + config + known_hosts einrichten
+ssh_setup.one_click_row_sub: Legt ~/.ssh/aur an, fügt einen Host-Block hinzu und verankert den AUR-Hostschlüssel.
+ssh_setup.btn_run_setup: Einrichtung starten
+ssh_setup.setup_failed: 'Einrichtung fehlgeschlagen: {err}'
+ssh_setup.setup_line_key_reused: 'Schlüssel: wiederverwendet {path}'
+ssh_setup.setup_line_key_generated: 'Schlüssel: erzeugt {path}'
+ssh_setup.setup_line_config_created: 'Config: ~/.ssh/config angelegt'
+ssh_setup.setup_line_config_updated: 'Config: ~/.ssh/config aktualisiert'
+ssh_setup.setup_line_config_ok: 'Config: bereits korrekt'
+ssh_setup.setup_line_hosts_ok: 'known_hosts: vertraut dem AUR bereits'
+ssh_setup.setup_line_hosts_added_plain: 'known_hosts: AUR-Hostschlüssel hinzugefügt (Fingerabdrücke gegen veröffentlichte Liste geprüft)'
+ssh_setup.setup_line_hosts_added_fp: 'known_hosts: verifizierte Schlüssel hinzugefügt — {fp}'
+ssh_setup.keys_empty_title: Keine SSH-Schlüssel gefunden
+ssh_setup.keys_empty_sub: Oben die Ein-Klick-Einrichtung ausführen, um ~/.ssh/aur anzulegen.
+ssh_setup.keys_list_failed: 'Schlüssel konnten nicht aufgelistet werden: {err}'
+ssh_setup.key_no_comment: kein Kommentar
+ssh_setup.key_fp_unavailable: Fingerabdruck nicht verfügbar
+ssh_setup.key_btn_selected: Gewählt
+ssh_setup.key_btn_use: Für AUR verwenden
+ssh_setup.key_section_title: AUR-Schlüssel (~/.ssh/aur)
+ssh_setup.key_section_desc: Datei wird wiederverwendet, falls vorhanden; sonst neuer ed25519-Schlüssel mit leerer Passphrase
+  für nicht-interaktive Nutzung. Für mehr Schutz ssh-keygen mit Passphrase selbst ausführen und den Schlüssel mit „Für AUR
+  verwenden“ wählen.
+ssh_setup.ensure_row_title: ~/.ssh/aur sicherstellen
+ssh_setup.ensure_row_sub: Überschreibt niemals einen bestehenden Schlüssel.
+ssh_setup.btn_ensure_key: Schlüssel sicherstellen
+ssh_setup.ssh_add_row_title: Gewählten Schlüssel in ssh-agent laden
+ssh_setup.ssh_add_row_sub: Führt ssh-add für den Schlüssel aus Ihrer Config aus (leere Passphrase funktioniert nicht-interaktiv).
+  Die Zeile „Agent prüfen“ wird nach erfolgreichem Add automatisch aktualisiert.
+ssh_setup.btn_ssh_add: ssh-add
+ssh_setup.agent_row_title: Schlüssel im ssh-agent auflisten
+ssh_setup.agent_row_sub: Führt ssh-add -l aus. Ohne SSH_AUTH_SOCK auf dem Desktop kann der erste Lauf ssh-agent -s starten und
+  den Socket für diese App-Sitzung behalten.
+ssh_setup.btn_check_agent: Agent prüfen
+ssh_setup.stamp_adding: Wird hinzugefügt…
+ssh_setup.stamp_checking: Wird geprüft…
+ssh_setup.stamp_working: Arbeitet…
+ssh_setup.stamp_updating: Wird aktualisiert…
+ssh_setup.stamp_writing: Wird geschrieben…
+ssh_setup.stamp_list_refresh_failed: Listen-Update fehlgeschlagen
+ssh_setup.stamp_failed: Fehlgeschlagen
+ssh_setup.stamp_generated: Erzeugt
+ssh_setup.stamp_reused: Wiederverwendet
+ssh_setup.stamp_already_trusted: Bereits vertrauenswürdig
+ssh_setup.stamp_keys_added: Schlüssel hinzugefügt
+ssh_setup.stamp_created: Angelegt
+ssh_setup.stamp_updated: Aktualisiert
+ssh_setup.stamp_unchanged: Unverändert
+ssh_setup.stamp_needs_key: Schlüssel nötig
+ssh_setup.stamp_na: k. A.
+ssh_setup.tip_hosts_present: AUR-Hostschlüssel sind bereits in known_hosts.
+ssh_setup.tip_wrote_config: ~/.ssh/config mit AUR-Host-Block geschrieben.
+ssh_setup.tip_refreshed_config: AUR-Host-Block in ~/.ssh/config aktualisiert.
+ssh_setup.tip_config_ok: ~/.ssh/config hatte bereits den korrekten AUR-Host-Eintrag.
+ssh_setup.tip_select_key: Oben einen SSH-Schlüssel wählen oder anlegen.
+ssh_setup.toast_refresh_agent_list: 'Agent-Liste konnte nicht aktualisiert werden: {detail}'
+ssh_setup.toast_key_setup_failed: 'Schlüssel-Einrichtung fehlgeschlagen: {err}'
+ssh_setup.started_embedded_agent: Neuer ssh-agent für diese Sitzung gestartet (kein Desktop-Agent erreichbar).
+ssh_setup.publish_section: Zum AUR veröffentlichen
+ssh_setup.publish_section_desc: Öffentlichen Schlüssel auf der AUR-Kontoseite eintragen, damit der Server Pushes akzeptiert. Das
+  AUR erlaubt mehrere Schlüssel — jede Zeile im Feld „SSH Public Key“.
+ssh_setup.copy_row_title: Öffentlichen Schlüssel in die Zwischenablage
+ssh_setup.copy_row_sub: Verwendet den oben gewählten Schlüssel.
+ssh_setup.btn_copy: Kopieren
+ssh_setup.open_row_title: AUR-Konto öffnen (Profil bearbeiten)
+ssh_setup.open_row_sub: Öffnet die Profilbearbeitung, wenn auf „Verbindung“ ein AUR-Benutzername gesetzt ist. Sonst Dialog zum
+  Eingeben und Speichern (gleiche AUR-Prüfung wie Verbindung) oder Registrierung öffnen.
+ssh_setup.btn_open: Öffnen
+ssh_setup.toast_set_username_connection: AUR-Benutzernamen unter „Verbindung“ setzen und „Öffnen“ erneut versuchen.
+ssh_setup.toast_read_key_fail: 'Schlüssel konnte nicht gelesen werden: {err}'
+ssh_setup.toast_profile_open_fail: 'Profil konnte nicht geöffnet werden: {err}'
+ssh_setup.toast_open_fail: 'Öffnen fehlgeschlagen: {err}'
+ssh_setup.dialog_username_title: AUR-Benutzername nicht gesetzt
+ssh_setup.dialog_username_body: |-
+  Noch kein AUR-Benutzername gespeichert. Unten eintragen und „Speichern und öffnen“ wählen — die App prüft ihn wie auf
+  „Verbindung“ beim AUR, öffnet dann Ihr Profil zum Einfügen des öffentlichen SSH-Schlüssels.
+
+  „Weiter“ öffnet die AUR-Registrierung, falls Sie noch kein Konto haben.
+ssh_setup.dialog_username_field: AUR-Benutzername
+ssh_setup.dialog_cancel: Abbrechen
+ssh_setup.dialog_continue: Weiter
+ssh_setup.dialog_save_open: Speichern und öffnen
+ssh_setup.dialog_enter_username: AUR-Benutzernamen zum Speichern eingeben oder „Weiter“ für die Registrierungsseite wählen.
+ssh_setup.toast_verify_save_fail: 'Benutzername konnte nicht verifiziert werden — nicht gespeichert: {e}'
+ssh_setup.toast_verified_save_config_fail: 'Verifiziert, aber Config konnte nicht gespeichert werden: {e}'
+ssh_setup.toast_username_saved_all: 'Benutzername gespeichert. Alle {registered_len} registrierten Pakete erscheinen unter diesem Konto ({n} vom AUR-RPC, Maintainer oder Co-Maintainer).'
+ssh_setup.toast_username_saved_partial: 'Benutzername gespeichert. {k} Paket(e) sind für dieses Konto auf dem AUR nicht gelistet (Maintainer/Co-Maintainer-RPC): {list}'
+ssh_setup.probe_section: Mit AUR-Server verifizieren
+ssh_setup.probe_section_desc: Ein erfolgreicher Test bedeutet, dass Ihr SSH-Schlüssel auf dem AUR registriert ist.
+ssh_setup.probe_row_title: SSH-Verbindung testen
+ssh_setup.probe_row_sub: ssh -T aur@aur.archlinux.org
+ssh_setup.btn_run_test: Test ausführen
+ssh_setup.connectivity_section: Konnektivität
+ssh_setup.connectivity_section_desc: Clientseitige Anpassungen für reibungsloses SSH zu aur.archlinux.org.
+ssh_setup.trust_row_title: Hostschlüssel von aur.archlinux.org vertrauen
+ssh_setup.trust_row_sub: Führt ssh-keyscan aus, prüft SHA256-Fingerabdrücke gegen die Liste auf aur.archlinux.org (mit
+  gebündeltem Fallback) und hängt bei Bedarf an known_hosts an.
+ssh_setup.btn_update_known_hosts: known_hosts aktualisieren
+ssh_setup.config_row_title: ~/.ssh/config für AUR einrichten
+ssh_setup.config_row_sub: Fügt den Host-Block für den gewählten Schlüssel hinzu oder aktualisiert ihn.
+ssh_setup.btn_write_entry: Eintrag schreiben
+ssh_setup.coming_soon_detail: 'Demnächst: {what}'
+ssh_setup.done_back_connection: Zurück zum Verbindungstest
+ssh_setup.done_hint_connection: SSH-Test erneut ausführen, um zu bestätigen.
+ssh_setup.done_back_onboarding: Einrichtung abschließen
+ssh_setup.done_hint_onboarding: SSH-Test oben (oder auf „Verbindung“) ausführen, wenn Veröffentlichen SSH noch als ungeprüft meldet.
+ssh_setup.op_failed: 'Fehlgeschlagen: {err}'
+sync.browse: Durchsuchen…
+sync.choose_destination: Zielordner wählen
+sync.dest_row_title: Zielverzeichnis
+sync.heading: PKGBUILD synchronisieren — {title}
+sync.row.destination: Ziel (PKGBUILD-Pfad)
+sync.row.source: Quelle
+sync.src_row_title: PKGBUILD-Quell-URL
+sync.status_downloading: lade herunter…
+sync.status_precheck: Prüfe, ob die Quelle ein PKGBUILD bereitstellt…
+sync.status_source_bad: 'PKGBUILD kann noch nicht heruntergeladen werden: {msg}'
+sync.status_source_ok: Unter dieser URL ist ein PKGBUILD verfügbar. Bei Bedarf Ziel setzen, dann herunterladen.
+sync.subtitle: PKGBUILD für {id} aus der konfigurierten Quelle in den Zielordner laden.
+sync.toast_bad_path: Dieser Ordnerpfad ist nicht verwendbar — absoluten Pfad ohne .. wählen
+sync.toast_default_dest: Standardziel wird verwendet
+sync.toast_dest_saved: Ziel gespeichert
+sync.toast_download_disabled: 'PKGBUILD-Download deaktiviert: {msg}'
+sync.toast_download_failed: Download fehlgeschlagen
+sync.toast_downloaded: PKGBUILD heruntergeladen
+sync.toast_folder_picker: Ordnerauswahl konnte nicht geöffnet werden.
+sync.toast_no_dir_for_download: Arbeitsverzeichnis unter „Verbindung“ setzen oder Zielordner durchsuchen.
+sync.toast_registry_save: 'Registry konnte nicht gespeichert werden: {e}'
+sync.toast_url_precheck_fail: '{e}'
+sync.use_default: Standard verwenden
+sync.use_default_tooltip: Gespeicherten Ordner leeren — Arbeitsverzeichnis + Paket-ID (oder älterer relativer Pfad) verwenden.
+sync.section_publish_title: Sync und Veröffentlichen
+sync.section_publish_desc: „Veröffentlichen“ kopiert PKGBUILD und .SRCINFO aus dem Ziel unten in den AUR-Git-Klon und erstellt
+  bei Bedarf Commits. Ein erfolgreicher Push aktualisiert das öffentliche AUR sofort. Bei einer brandneuen pkgbase kann der
+  erste Klon warnen, dass das Repository leer ist — das ist erwartet.
+sync.btn_download: PKGBUILD herunterladen
+sync.btn_continue: Weiter
+sync.page_title: PKGBUILD synchronisieren
+sync.status_saved_to: 'gespeichert unter {path}'
+sync.status_error: 'Fehler: {err}'
+validate.page_title: Validieren
+validate.heading: 'PKGBUILD validieren — {title}'
+validate.subtitle: Erforderliche Prüfungen starten automatisch beim Öffnen dieser Seite (wenn das Paketverzeichnis bekannt
+  ist — Arbeitsverzeichnis oder absoluter Zielpfad auf „Sync“). „Alle Prüfungen ausführen“ inkludiert optionale Linter.
+  Fehler bei erforderlichen Prüfungen führen sehr wahrscheinlich auch zu Build-Fehlern.
+validate.log_title: Validierungsprotokoll
+validate.log_subtitle: ShellCheck, namcap, makepkg --noextract und erweiterte Build-Ausgabe erscheinen hier als Stream.
+validate.section.required_title: Erforderlich
+validate.section.required_sub: Fehler hier verhindern einen erfolgreichen makepkg-Lauf.
+validate.section.optional_title: Optionale Linter
+validate.section.optional_sub: Qualitätshinweise. Fehlende Werkzeuge werden mit Installationshinweis übersprungen.
+validate.section.extended_title: Erweitert (fakeroot-Build)
+validate.section.extended_sub: Baut das Paket tatsächlich mit fakeroot und prüft das Artefakt. Langsam — mehrere Minuten
+  — und erzeugt eine echte .pkg.tar.*-Datei im Arbeitsverzeichnis.
+validate.btn.lint_checks: Linter ausführen
+validate.btn.extended_build: Erweiterten Build ausführen
+validate.btn.extended_build_tooltip: Baut das Paket in fakeroot. Langsam.
+validate.btn.run_all: Alle Prüfungen ausführen
+validate.btn.run_extended: Erweiterte Prüfungen ausführen
+validate.btn.run_extended_tooltip: Baut das Paket in fakeroot. Langsam.
+validate.btn.continue_build: Weiter zum Bauen
+validate.status.running_required: erforderliche Prüfungen laufen…
+validate.status.running_fast: schnelle Prüfungen laufen…
+validate.status.running_optional: optionale Linter-Prüfungen laufen…
+validate.status.running_extended: erweiterte Prüfungen laufen — kann eine Weile dauern…
+validate.row.not_run: nicht ausgeführt
+validate.row.run: Ausführen
+validate.row.running: läuft…
+validate.summary: '{pass} bestanden · {warn} Warnung(en) · {fail} fehlgeschlagen · {skipped} übersprungen'
+validate.check.bash_syntax.title: Bash-Syntax
+validate.check.bash_syntax.desc: PKGBUILD mit `bash -n` parsen — findet Tippfehler vor makepkg.
+validate.check.print_srcinfo.title: .SRCINFO-Erzeugung
+validate.check.print_srcinfo.desc: '`makepkg --printsrcinfo` — PKGBUILD muss die erwarteten Felder liefern.'
+validate.check.verify_source.title: Quellen prüfen
+validate.check.verify_source.desc: '`makepkg --verifysource` — lädt jede Quelle herunter und prüft Prüfsummen.'
+validate.check.shellcheck.title: shellcheck
+validate.check.shellcheck.desc: Statische Analyse für PKGBUILD mit makepkg-orientierten shellcheck-Ausschlüssen (optional —
+  `shellcheck` installieren).
+validate.check.namcap.title: namcap (PKGBUILD)
+validate.check.namcap.desc: Arch-Paketierungs-Lint für das PKGBUILD (optional — `namcap` installieren).
+validate.check.fakeroot_build.title: Build in fakeroot
+validate.check.fakeroot_build.desc: '`makepkg -f --noconfirm` — vollständiger Build mit fakeroot für package(). Langsam.'
+validate.check.namcap_package.title: namcap (gebautes Paket)
+validate.check.namcap_package.desc: '`namcap -i <pkg>.pkg.tar.*` auf dem Artefakt aus dem fakeroot-Build.'
+validate.toast_extended_ok: Erweiterte Prüfungen abgeschlossen
+validate.toast_fakeroot_fail: Fakeroot-Build fehlgeschlagen
+validate.toast_fast_ok: Schnelle Prüfungen abgeschlossen
+validate.toast_fast_required_fail: Einige erforderliche Prüfungen fehlgeschlagen
+validate.toast_no_workdir: Arbeitsverzeichnis unter „Verbindung“ setzen oder Zielordner auf „Sync“ wählen.
+validate.toast_optional_fail: Einige optionale Lint-Prüfungen fehlgeschlagen
+validate.toast_optional_ok: Optionale Lint-Prüfungen abgeschlossen
+validate.toast_required_fail: Einige erforderliche Prüfungen fehlgeschlagen
+validate.toast_required_ok: Erforderliche Prüfungen abgeschlossen
+version.checksum_row_sub: Bei Git-Paketen mit leeren source-Arrays oft überspringbar.
+version.checksum_row_title: Prüfsummen aktualisieren
+version.checksum_run_btn: updpkgsums ausführen
+version.checksums_section: Prüfsummen
+version.checksums_section_desc: Führt `updpkgsums` für das PKGBUILD im Arbeitsverzeichnis aus.
+version.log_updpkgsums_sub: Ausgabe von updpkgsums zur Prüfsummen-Aktualisierung erscheint unten nach dem Start.
+version.log_updpkgsums_title: updpkgsums-Protokoll
+version.toast_checksums_ok: Prüfsummen im PKGBUILD aktualisiert
+version.toast_checksums_unchanged: Prüfsummen stimmten bereits — PKGBUILD unverändert
+version.toast_checksums_updated: Prüfsummen im PKGBUILD aktualisiert
+version.toast_err: 'Fehler: {e}'
+version.toast_no_pkg: Zuerst ein Paket auf der Startseite wählen.
+version.toast_updpkgsums_exit: updpkgsums beendet mit {status}
+version.toast_updpkgsums_hint: updpkgsums benötigt Netzwerk — in einem Terminal ausführen, wenn die abgesicherte Prüfung fehlschlug.
+version.page_title: Version
+version.heading: Version und Prüfsummen
+version.continue_validate: Weiter zur Validierung
+version.kind.bin_title: Binärpaket
+version.kind.bin_desc: pkgver im PKGBUILD erhöhen, dann Prüfsummen aktualisieren, damit sha256sums zu den neuen Release-Dateien passen.
+version.kind.git_title: Git-Paket
+version.kind.git_desc: pkgver wird automatisch aus `git describe` berechnet. pkgrel im PKGBUILD nur erhöhen, wenn Sie gegen
+  denselben Tag neu bauen.
+version.kind.other_title: Quellpaket
+version.kind.other_desc: pkgver/pkgrel im PKGBUILD nach Bedarf anpassen, danach Prüfsummen aktualisieren, wenn Sie neue Quellen
+  bezogen haben.

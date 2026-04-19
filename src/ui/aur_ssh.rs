@@ -8,6 +8,7 @@ use adw::prelude::*;
 use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -27,15 +28,12 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("AUR SSH commands")
+        .label(i18n::t("aur_ssh.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Talks to aur@aur.archlinux.org with the curated command set maintainers \
-             usually drive by hand. The selected SSH key is used automatically.",
-        )
+        .label(i18n::t("aur_ssh.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -45,16 +43,18 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     // --- Target inputs ---
-    let pkg_row = EntryRow::builder().title("Package").build();
+    let pkg_row = EntryRow::builder()
+        .title(i18n::t("aur_ssh.pkg_row_title"))
+        .build();
     if let Some(pkg) = state.borrow().package.as_ref() {
         pkg_row.set_text(&pkg.id);
     }
     let args_row = EntryRow::builder()
-        .title("Extra args (reason / usernames / keywords)")
+        .title(i18n::t("aur_ssh.args_row_title"))
         .build();
     content.append(&ui::collapsible_preferences_section(
-        "Target",
-        Some("Package name and optional arguments shared by the buttons below."),
+        i18n::t("aur_ssh.section_target_title"),
+        Some(i18n::t("aur_ssh.section_target_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&pkg_row);
@@ -64,29 +64,29 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
 
     // --- Command groups ---
     let (account_list, account_exp) = ui::collapsible_preferences_section_with_expander(
-        "Account",
-        Some("Read-only commands that ignore the package field."),
+        i18n::t("aur_ssh.section_account_title"),
+        Some(i18n::t("aur_ssh.section_account_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     let (voting_list, voting_exp) = ui::collapsible_preferences_section_with_expander(
-        "Voting & notifications",
-        Some("Affect only your relationship to the package."),
+        i18n::t("aur_ssh.section_voting_title"),
+        Some(i18n::t("aur_ssh.section_voting_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     let (maintenance_list, maintenance_exp) = ui::collapsible_preferences_section_with_expander(
-        "Maintenance",
-        Some("Change ownership or create a new AUR repo. Destructive."),
+        i18n::t("aur_ssh.section_maintenance_title"),
+        Some(i18n::t("aur_ssh.section_maintenance_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     let (metadata_list, metadata_exp) = ui::collapsible_preferences_section_with_expander(
-        "Package metadata",
-        Some("Replace the co-maintainer list or keyword set."),
+        i18n::t("aur_ssh.section_metadata_title"),
+        Some(i18n::t("aur_ssh.section_metadata_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
 
     let log = LogView::new(
-        "SSH command log",
-        "Lines returned by aur@aur.archlinux.org stream here for each command you run.",
+        i18n::t("aur_ssh.log_title"),
+        i18n::t("aur_ssh.log_subtitle"),
     );
 
     for cmd in AurSshCommand::ALL {
@@ -115,7 +115,8 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
     content.append(log.widget());
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("AUR SSH commands", &toasts)
+    let page_title = i18n::t("aur_ssh.page_title");
+    ui::home::wrap_page(&page_title, &toasts)
 }
 
 fn render_command_row(
@@ -137,11 +138,11 @@ fn render_command_row(
     if cmd.args_shape() != ArgsShape::None
         && let Some(hint) = cmd.args_hint()
     {
-        row.add_suffix(&badge(hint, "dim-label"));
+        row.add_suffix(&badge(&hint, "dim-label"));
     }
 
     let run_btn = Button::builder()
-        .label("Run")
+        .label(i18n::t("aur_ssh.run_btn"))
         .valign(Align::Center)
         .css_classes(vec![
             "pill",
@@ -165,7 +166,7 @@ fn render_command_row(
         let package = if cmd.needs_package() {
             let pkg = pkg_row.text().trim().to_string();
             if pkg.is_empty() {
-                toasts.add_toast(Toast::new("Enter a package name first."));
+                toasts.add_toast(Toast::new(&i18n::t("aur_ssh.toast_enter_name")));
                 btn.set_sensitive(true);
                 return;
             }
@@ -193,13 +194,25 @@ fn render_command_row(
                 btn_cb.set_sensitive(true);
                 match res {
                     Ok(status) if status.success() => {
-                        toasts_cb.add_toast(Toast::new(&format!("{}: ok", cmd.cmd())));
+                        let c = cmd.cmd();
+                        toasts_cb
+                            .add_toast(Toast::new(&i18n::tf("aur_ssh.toast_ok", &[("cmd", c)])));
                     }
                     Ok(status) => {
-                        toasts_cb.add_toast(Toast::new(&format!("{}: exited {status}", cmd.cmd())));
+                        let c = cmd.cmd();
+                        let st = status.to_string();
+                        toasts_cb.add_toast(Toast::new(&i18n::tf(
+                            "aur_ssh.toast_exit",
+                            &[("cmd", c), ("status", st.as_str())],
+                        )));
                     }
                     Err(e) => {
-                        toasts_cb.add_toast(Toast::new(&format!("{}: {e}", cmd.cmd())));
+                        let c = cmd.cmd();
+                        let err = e.to_string();
+                        toasts_cb.add_toast(Toast::new(&i18n::tf(
+                            "aur_ssh.toast_err",
+                            &[("cmd", c), ("err", err.as_str())],
+                        )));
                     }
                 }
             },

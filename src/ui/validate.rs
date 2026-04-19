@@ -13,6 +13,7 @@ use adw::prelude::*;
 use adw::{ActionRow, ExpanderRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -34,6 +35,30 @@ struct RowHandles {
 
 type RowMap = Rc<RefCell<HashMap<CheckId, RowHandles>>>;
 
+fn check_row_title(id: CheckId) -> String {
+    i18n::t(match id {
+        CheckId::BashSyntax => "validate.check.bash_syntax.title",
+        CheckId::PrintSrcinfo => "validate.check.print_srcinfo.title",
+        CheckId::VerifySource => "validate.check.verify_source.title",
+        CheckId::ShellCheck => "validate.check.shellcheck.title",
+        CheckId::Namcap => "validate.check.namcap.title",
+        CheckId::FakerootBuild => "validate.check.fakeroot_build.title",
+        CheckId::NamcapPackage => "validate.check.namcap_package.title",
+    })
+}
+
+fn check_row_description(id: CheckId) -> String {
+    i18n::t(match id {
+        CheckId::BashSyntax => "validate.check.bash_syntax.desc",
+        CheckId::PrintSrcinfo => "validate.check.print_srcinfo.desc",
+        CheckId::VerifySource => "validate.check.verify_source.desc",
+        CheckId::ShellCheck => "validate.check.shellcheck.desc",
+        CheckId::Namcap => "validate.check.namcap.desc",
+        CheckId::FakerootBuild => "validate.check.fakeroot_build.desc",
+        CheckId::NamcapPackage => "validate.check.namcap_package.desc",
+    })
+}
+
 /// Runs bash / `.SRCINFO` / `verifysource` checks in the background. No-op when
 /// the package directory cannot be resolved.
 fn spawn_required_tier_streaming(
@@ -50,7 +75,7 @@ fn spawn_required_tier_streaming(
     let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
         return;
     };
-    summary_status.set_text("running required checks…");
+    summary_status.set_text(&i18n::t("validate.status.running_required"));
     mark_tier_running(rows, CheckTier::Required);
     refresh_required_section_icon(rows, required_header);
 
@@ -66,11 +91,11 @@ fn spawn_required_tier_streaming(
             for rep in &reports {
                 apply_report(&rows_done, rep, &hdr);
             }
-            summary_status.set_text(&summarize(&reports));
+            summary_status.set_text(&summarize_i18n(&reports));
             if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                toasts.add_toast(Toast::new("Some required checks failed"));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_required_fail")));
             } else {
-                toasts.add_toast(Toast::new("Required checks complete"));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_required_ok")));
             }
         },
     );
@@ -90,17 +115,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label(format!("Validate PKGBUILD — {}", pkg.title))
+        .label(i18n::tf(
+            "validate.heading",
+            &[("title", pkg.title.as_str())],
+        ))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Required checks run automatically when you open this page (when the package \
-             directory is known — working directory or an absolute destination on Sync). \
-             Use “Run all checks” to include optional lints. Failures in required checks will \
-             very likely also fail the build.",
-        )
+        .label(i18n::t("validate.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -110,14 +133,18 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     let log = LogView::new(
-        "Validation log",
-        "ShellCheck, namcap, makepkg --noextract, and extended build output stream here.",
+        i18n::t("validate.log_title"),
+        i18n::t("validate.log_subtitle"),
     );
     let rows: RowMap = Rc::new(RefCell::new(HashMap::new()));
 
+    let section_required_sub = i18n::t("validate.section.required_sub");
+    let section_optional_sub = i18n::t("validate.section.optional_sub");
+    let section_extended_sub = i18n::t("validate.section.extended_sub");
+
     let (required_list, required_exp) = ui::collapsible_preferences_section_with_expander(
-        "Required",
-        Some("Failures here block a successful makepkg."),
+        i18n::t("validate.section.required_title"),
+        Some(section_required_sub.as_str()),
         false,
     );
     let required_status_icon = Image::builder().build();
@@ -126,29 +153,25 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     required_exp.add_suffix(&required_status_icon);
     let required_section_hdr = Rc::new((required_exp.clone(), required_status_icon.clone()));
     let (optional_list, optional_exp) = ui::collapsible_preferences_section_with_expander(
-        "Optional lints",
-        Some("Quality signals. Missing tools are skipped with an install hint."),
+        i18n::t("validate.section.optional_title"),
+        Some(section_optional_sub.as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     let optional_run_btn = Button::builder()
-        .label("Run Lint checks")
+        .label(i18n::t("validate.btn.lint_checks"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
     optional_exp.add_suffix(&optional_run_btn);
 
     let (extended_list, extended_exp) = ui::collapsible_preferences_section_with_expander(
-        "Extended (fakeroot build)",
-        Some(
-            "Actually builds the package using fakeroot and lints the artefact. \
-             Slow — can take several minutes — and produces a real .pkg.tar.* file in \
-             the working directory.",
-        ),
+        i18n::t("validate.section.extended_title"),
+        Some(section_extended_sub.as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     let extended_section_run_btn = Button::builder()
-        .label("Run extended build")
-        .tooltip_text("Builds the package in fakeroot. Slow.")
+        .label(i18n::t("validate.btn.extended_build"))
+        .tooltip_text(i18n::t("validate.btn.extended_build_tooltip"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
@@ -185,16 +208,16 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(log.widget());
 
     let run_all_btn = Button::builder()
-        .label("Run all checks")
+        .label(i18n::t("validate.btn.run_all"))
         .css_classes(vec!["pill", "suggested-action"])
         .build();
     let run_extended_btn = Button::builder()
-        .label("Run extended checks")
-        .tooltip_text("Builds the package in fakeroot. Slow.")
+        .label(i18n::t("validate.btn.run_extended"))
+        .tooltip_text(i18n::t("validate.btn.run_extended_tooltip"))
         .css_classes(vec!["pill"])
         .build();
     let continue_btn = Button::builder()
-        .label("Continue to build")
+        .label(i18n::t("validate.btn.continue_build"))
         .css_classes(vec!["pill"])
         .build();
     let btn_row = GtkBox::builder()
@@ -219,13 +242,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         run_all_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on Connection or pick a destination folder on Sync.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_no_workdir")));
                 return;
             };
             log.clear();
-            summary_status.set_text("running fast checks…");
+            summary_status.set_text(&i18n::t("validate.status.running_fast"));
             mark_tier_running(&rows, CheckTier::Required);
             mark_tier_running(&rows, CheckTier::Optional);
             refresh_required_section_icon(&rows, &required_hdr);
@@ -242,11 +263,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     for rep in &reports {
                         apply_report(&rows_done, rep, &hdr);
                     }
-                    summary_status.set_text(&summarize(&reports));
+                    summary_status.set_text(&summarize_i18n(&reports));
                     if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                        toasts.add_toast(Toast::new("Some required checks failed"));
+                        toasts.add_toast(Toast::new(&i18n::t("validate.toast_required_fail")));
                     } else {
-                        toasts.add_toast(Toast::new("Fast checks complete"));
+                        toasts.add_toast(Toast::new(&i18n::t("validate.toast_fast_ok")));
                     }
                 },
             );
@@ -266,13 +287,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         optional_run_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on Connection or pick a destination folder on Sync.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_no_workdir")));
                 return;
             };
             log.clear();
-            summary_status.set_text("running optional lint checks…");
+            summary_status.set_text(&i18n::t("validate.status.running_optional"));
             mark_tier_running(&rows, CheckTier::Optional);
             optional_run_inner.set_sensitive(false);
 
@@ -290,11 +309,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     for rep in &reports {
                         apply_report(&rows_done, rep, &hdr);
                     }
-                    summary_status.set_text(&summarize(&reports));
+                    summary_status.set_text(&summarize_i18n(&reports));
                     if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                        toasts.add_toast(Toast::new("Some optional lint checks failed"));
+                        toasts.add_toast(Toast::new(&i18n::t("validate.toast_optional_fail")));
                     } else {
-                        toasts.add_toast(Toast::new("Optional lint checks complete"));
+                        toasts.add_toast(Toast::new(&i18n::t("validate.toast_optional_ok")));
                     }
                 },
             );
@@ -370,7 +389,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("Validate", &toasts)
+    ui::home::wrap_page(&i18n::t("validate.page_title"), &toasts)
 }
 
 /// Owned GTK / app handles passed into [`spawn_extended_validation_run`].
@@ -390,14 +409,13 @@ struct ExtendedValidationRunCtx {
 fn spawn_extended_validation_run(ctx: ExtendedValidationRunCtx, busy_buttons: &[Button]) {
     let work = ctx.state.borrow().config.work_dir.clone();
     let Some(dir) = sync::package_dir(work.as_deref(), &ctx.pkg) else {
-        ctx.toasts.add_toast(Toast::new(
-            "Set a working directory on Connection or pick a destination folder on Sync.",
-        ));
+        ctx.toasts
+            .add_toast(Toast::new(&i18n::t("validate.toast_no_workdir")));
         return;
     };
     ctx.log.clear();
     ctx.summary_status
-        .set_text("running extended checks — this may take a while…");
+        .set_text(&i18n::t("validate.status.running_extended"));
     mark_tier_running(&ctx.rows, CheckTier::Extended);
     for b in busy_buttons {
         b.set_sensitive(false);
@@ -419,11 +437,11 @@ fn spawn_extended_validation_run(ctx: ExtendedValidationRunCtx, busy_buttons: &[
             for rep in &reports {
                 apply_report(&rows_done, rep, &hdr);
             }
-            summary_status.set_text(&summarize(&reports));
+            summary_status.set_text(&summarize_i18n(&reports));
             if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                toasts.add_toast(Toast::new("Fakeroot build failed"));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_fakeroot_fail")));
             } else {
-                toasts.add_toast(Toast::new("Extended checks complete"));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_extended_ok")));
             }
         },
     );
@@ -443,8 +461,8 @@ fn render_check_row(
     required_header: &Rc<(ExpanderRow, Image)>,
 ) -> (ActionRow, RowHandles) {
     let row = ActionRow::builder()
-        .title(id.title())
-        .subtitle(id.description())
+        .title(check_row_title(id))
+        .subtitle(check_row_description(id))
         // Descriptions include shell placeholders like `<pkg>.pkg.tar.*`; treat as plain text.
         .use_markup(false)
         .build();
@@ -455,12 +473,12 @@ fn render_check_row(
     row.add_prefix(&status_icon);
 
     let summary = Label::builder()
-        .label("not run")
+        .label(i18n::t("validate.row.not_run"))
         .css_classes(vec!["dim-label", "caption"])
         .build();
     let spinner = Spinner::new();
     let run_btn = Button::builder()
-        .label("Run")
+        .label(i18n::t("validate.row.run"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
@@ -478,9 +496,7 @@ fn render_check_row(
         run_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on Connection or pick a destination folder on Sync.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_no_workdir")));
                 return;
             };
             mark_running(&rows, id);
@@ -513,7 +529,7 @@ fn mark_running(rows: &RowMap, id: CheckId) {
         h.status_icon
             .set_icon_name(Some("content-loading-symbolic"));
         set_status_classes(&h.status_icon, &["dim-label"]);
-        h.summary.set_text("running…");
+        h.summary.set_text(&i18n::t("validate.row.running"));
     }
 }
 
@@ -597,7 +613,7 @@ fn set_status_classes(icon: &Image, classes: &[&str]) {
     }
 }
 
-fn summarize(reports: &[CheckReport]) -> String {
+fn summarize_i18n(reports: &[CheckReport]) -> String {
     let mut pass = 0usize;
     let mut warn = 0usize;
     let mut fail = 0usize;
@@ -610,5 +626,13 @@ fn summarize(reports: &[CheckReport]) -> String {
             CheckOutcome::Skipped => skipped += 1,
         }
     }
-    format!("{pass} passed · {warn} warn · {fail} failed · {skipped} skipped")
+    i18n::tf(
+        "validate.summary",
+        &[
+            ("pass", &pass.to_string()),
+            ("warn", &warn.to_string()),
+            ("fail", &fail.to_string()),
+            ("skipped", &skipped.to_string()),
+        ],
+    )
 }

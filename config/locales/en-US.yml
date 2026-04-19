@@ -1,0 +1,804 @@
+app.window_title: AUR Builder
+log_view.placeholder: |-
+  No output yet.
+
+  Stdout, stderr, and status lines from the tool will stream here.
+aur.role.co_maintainer: co-maintainer
+aur.role.maintainer: maintainer
+aur_ssh.args_row_title: Extra args (reason / usernames / keywords)
+aur_ssh.heading: AUR SSH commands
+aur_ssh.log_subtitle: Lines returned by aur@aur.archlinux.org stream here for each command you run.
+aur_ssh.log_title: SSH command log
+aur_ssh.page_title: AUR SSH commands
+aur_ssh.pkg_row_title: Package
+aur_ssh.run_btn: Run
+aur_ssh.section_account_desc: Read-only commands that ignore the package field.
+aur_ssh.section_account_title: Account
+aur_ssh.section_maintenance_desc: Change ownership or create a new AUR repo. Destructive.
+aur_ssh.section_maintenance_title: Maintenance
+aur_ssh.section_metadata_desc: Replace the co-maintainer list or keyword set.
+aur_ssh.section_metadata_title: Package metadata
+aur_ssh.section_target_desc: Package name and optional arguments shared by the buttons below.
+aur_ssh.section_target_title: Target
+aur_ssh.section_voting_desc: Affect only your relationship to the package.
+aur_ssh.section_voting_title: Voting & notifications
+aur_ssh.subtitle: Talks to aur@aur.archlinux.org with the curated command set maintainers usually drive by hand. The selected
+  SSH key is used automatically.
+aur_ssh.toast_enter_name: Enter a package name first.
+aur_ssh.toast_err: '{cmd}: {err}'
+aur_ssh.toast_exit: '{cmd}: exited {status}'
+aur_ssh.toast_ok: '{cmd}: ok'
+aur_ssh.args.hint_comaintainers: space-separated AUR usernames
+aur_ssh.args.hint_freeform_reason: free-form reason (optional)
+aur_ssh.args.hint_keywords: space-separated keywords
+aur_ssh.args.hint_many_generic: space-separated arguments
+aur_ssh.cmd.adopt.desc: Claim an orphaned package you want to maintain.
+aur_ssh.cmd.adopt.title: Adopt (orphan → me)
+aur_ssh.cmd.disown.desc: Give up your maintainer role for a package.
+aur_ssh.cmd.disown.title: Disown
+aur_ssh.cmd.flag.desc: Flag a package as out-of-date with an optional reason.
+aur_ssh.cmd.flag.title: Flag out-of-date
+aur_ssh.cmd.help.desc: Prints the server's built-in help text.
+aur_ssh.cmd.help.title: Help — list available commands
+aur_ssh.cmd.list_repos.desc: Lists every AUR git repository your key has push access to.
+aur_ssh.cmd.list_repos.title: List my AUR repositories
+aur_ssh.cmd.notify.desc: Receive notifications for package updates and comments.
+aur_ssh.cmd.notify.title: Enable notifications
+aur_ssh.cmd.set_comaintainers.desc: Replace the co-maintainer list. Usernames, space-separated.
+aur_ssh.cmd.set_comaintainers.title: Set co-maintainers
+aur_ssh.cmd.set_keywords.desc: Replace the package keywords. Space-separated.
+aur_ssh.cmd.set_keywords.title: Set keywords
+aur_ssh.cmd.setup_repo.desc: Create an empty AUR git repo. First-time package registration.
+aur_ssh.cmd.setup_repo.title: Create empty AUR repository
+aur_ssh.cmd.unflag.desc: Clear the out-of-date flag you set.
+aur_ssh.cmd.unflag.title: Unflag (clear out-of-date)
+aur_ssh.cmd.unnotify.desc: Stop receiving notifications for this package.
+aur_ssh.cmd.unnotify.title: Disable notifications
+aur_ssh.cmd.unvote.desc: Remove your vote for a package.
+aur_ssh.cmd.unvote.title: Unvote
+aur_ssh.cmd.vote.desc: Vote for a package.
+aur_ssh.cmd.vote.title: Vote
+build.btn: Build
+build.continue_publish: Continue to publish
+build.error_status: 'error: {err}'
+build.heading: Build — {title}
+build.hint: Runs `makepkg -f` in the package directory. Never run this app as root.
+build.log_sub: Live stdout and stderr from makepkg appear below once you press Build.
+build.log_title: Build log
+build.makepkg_exit: makepkg exited {status}
+build.option_clean: Clean build tree after success (--clean)
+build.option_nobuild: Prepare only (--nobuild)
+build.status_building: building…
+build.status_succeeded: build succeeded
+build.toast_done: Build finished
+build.toast_error: Build error
+build.toast_failed: Build failed
+build.toast_no_pkg: Pick a package on the Home tab before building.
+build.toast_root: Refusing to build as root.
+connection.account_section: AUR account
+connection.account_section_desc: Same login as on aur.archlinux.org. Used for “Import from AUR account”, RPC lookups, and
+  opening your profile when pasting SSH keys. Press the apply (✓) button to save — the AUR is queried first and registered
+  packages are checked against your maintainer/co-maintainer list.
+connection.aur_section: AUR Archlinux
+connection.aur_section_desc: aur.archlinux.org — A successful probe means your SSH key is registered on the AUR.
+connection.browse: Browse…
+connection.choose_ssh_key: Choose SSH private key
+connection.choose_workdir: Choose working directory
+connection.continue: Continue
+connection.continue_tooltip: SSH verification is only required for the Publish step.
+connection.devtools_subtitle: /usr/share/devtools
+connection.devtools_title: devtools files
+connection.heading: Verify SSH access to the AUR
+connection.makepkg_conf_title: makepkg.conf
+connection.open: Open
+connection.open_setup: Open setup
+connection.packaging_section: Packaging configuration
+connection.packaging_section_desc: Opens fixed system paths with your desktop default application (via GTK). If nothing happens,
+  set a default handler for `.conf` files or folders.
+connection.page_title: AUR connection
+connection.paths_section: Paths
+connection.recommended_section: Recommended environment
+connection.recommended_section_desc: 'These are not required to open the app, but they match common maintainer practice: install
+  the `base-devel` group for toolchain completeness, use `fakeroot` for local `makepkg --fakeroot` checks, and add `devtools`
+  so you can run clean-chroot builds (missing host libraries then show up before you push). Typical chroot state lives under
+  `/var/lib/archbuild` after the first root is created. https://wiki.archlinux.org/title/DeveloperWiki:Building_in_a_clean_chroot'
+connection.run_test: Run test
+connection.setup_ssh_subtitle: Pick a key, copy its public half, open the AUR account page.
+connection.setup_ssh_title: Set up SSH
+connection.ssh_key_title: SSH key (optional override)
+connection.subtitle: Your AUR username identifies you for package lookups; your SSH key proves you own that account when you
+  push. Edit the username under AUR account below, then press apply (✓) to save and verify registered packages. Make sure
+  the tools, the key, and the working directory are ready before the first build.
+connection.test_ssh_subtitle: ssh -T aur@aur.archlinux.org
+connection.test_ssh_title: Test SSH connection
+connection.toast_file_picker: Could not open file picker.
+connection.toast_folder_picker: Could not open folder picker.
+connection.toast_no_parent_window: Could not find a parent window for opening the path.
+connection.toast_open_path_failed: 'Could not open {path}: {err}'
+connection.tool_row.detail_hint: '{detail} — {hint}'
+connection.tool_row.missing: 'missing — install: {hint}'
+connection.tool_row.purpose_path: '{purpose} — using `{via}`'
+connection.tools_section: Required tools
+connection.tools_section_desc: These must be on PATH. Missing ones can be installed from the official repos.
+connection.unmatched_more: '{head} … (+{more} more)'
+connection.username_cleared_short: Username cleared.
+connection.username_cleared_with_packages: Username cleared. {n} package(s) remain — save a username again to verify them
+  on the AUR.
+connection.username_saved_all: Username saved. All {registered} registered package(s) appear under this account ({aur} from
+  AUR RPC, maintainer or co-maintainer).
+connection.username_saved_partial: 'Username saved. {k} package(s) are not listed for this account on the AUR (maintainer/co-maintainer
+  RPC): {list}'
+connection.username_title: AUR username
+connection.username_verify_failed: 'Could not verify username — not saved: {e}'
+connection.workdir_title: Working directory
+home.action.clone: Clone / open wizard
+home.action.edit: Edit package
+home.action.edit_tooltip: Edit
+home.action.remove: Remove from registry
+home.action.remove_tooltip: Remove
+home.add_favorite: Add to favorites
+home.add_package: Add package…
+home.add_package_help_body: 'Add package… opens the package editor to add or change this app''s local registry entry: pkgbase
+  id, PKGBUILD download URL, package kind, and optional sync or destination folders.
+
+
+  It does not create the Git repository on the AUR by itself—that is what Register new AUR package is for once that flow is
+  complete.
+
+
+  If your packages already exist on the AUR, Import from AUR account… can add several rows from your username at once. Use
+  Add package… when import lists nothing, you are preparing a new pkgbase before it exists on the AUR, or you need custom
+  paths or titles.'
+home.add_package_help_tooltip: What does Add package… do?
+home.dialog_remove_mismatch_body: 'This removes only local registry entries (not the AUR). Packages: {packages}'
+home.dialog_remove_mismatch_title: Remove mismatched packages?
+home.dialog_remove_title: Remove mismatched packages?
+home.dialog_response_cancel: _Cancel
+home.dialog_response_remove: _Remove
+home.empty_no_match_sub: Try adjusting search or filter.
+home.empty_no_match_title: No matching packages
+home.empty_no_packages_sub: Click “Add package…” below to register one.
+home.empty_no_packages_title: No packages yet
+home.empty_sub: Add a package or import from your AUR account.
+home.empty_title: No packages yet
+home.favorite_tooltip: Favorite — also listed under Favorites above
+home.filter.all: All packages
+home.filter.flagged: Flagged only
+home.filter.not_flagged: Not flagged
+home.footer_tip: 'Tip: use “Register new AUR package” for a first-time pkgbase push; use Publish when the AUR repo already
+  exists. After you apply your username on the AUR Connection tab, rows in red are not listed for that login as maintainer
+  or co-maintainer in the last RPC check.'
+home.heading: Pick a package to maintain
+home.import_account_dots: Import from AUR account…
+home.last_updated.days_ago: '{n} days ago'
+home.last_updated.hours_ago: '{n} h ago'
+home.last_updated.just_now: just now
+home.last_updated.min_ago: '{n} min ago'
+home.last_updated.never: 'Last updated: never — run Sync or Version → Reload to record.'
+home.last_updated.prefix: 'Last updated: {detail}'
+home.last_updated.unknown_date: unknown date
+home.manage_packages_dots: Manage packages…
+home.open_manage: Manage packages
+home.open_onboarding: Import from AUR account
+home.page_title: Home
+home.register_aur: Register new AUR package
+home.register_aur_tooltip: 'Open the Register wizard: define a new pkgbase, validate, and push to create the AUR Git repository.'
+home.remove_confirm_body: This removes “{id}” from the local list. It does not delete files on disk.
+home.remove_confirm_cancel: Cancel
+home.remove_confirm_remove: Remove
+home.remove_confirm_title: Remove from registry?
+home.remove_favorite: Remove from favorites
+home.remove_mismatch: Remove mismatched…
+home.remove_mismatch_empty_toast: No mismatched packages to remove — run “apply” on your username on the AUR Connection tab
+  first, or none are registered.
+home.remove_mismatch_tooltip: Remove packages shown in red — not listed for your saved AUR username as maintainer or co-maintainer
+  in the last Connection-tab check.
+home.row.error_tooltip: This package is not listed for your saved AUR username (maintainer/co-maintainer RPC). Open Connection
+  → AUR account to fix.
+home.row.mismatch_tooltip: Not listed for your saved AUR username as maintainer or co-maintainer in the last RPC check. Use
+  AUR Connection → apply on the username field to re-check.
+home.row.not_on_aur_sub: Open Connection and verify your username, or remove this entry.
+home.row.not_on_aur_title: Not on your AUR account
+home.search_placeholder: Search packages…
+home.section.all_packages: All packages
+home.section.favorites: Favorites
+home.section.packages: Packages
+home.show_title: Show
+home.sort.kind: Kind
+home.sort.name_asc: Name (A–Z)
+home.sort.name_desc: Name (Z–A)
+home.sort.refresh_newest: Last updated (newest)
+home.sort.refresh_oldest: Last updated (oldest)
+home.sort_title: Sort
+home.subtitle: Sync the PKGBUILD from its upstream source, build locally with makepkg, then push to the AUR. Add packages
+  or start AUR registration from the buttons below.
+home.toast_dialog_open_fail: Could not open confirmation dialog.
+home.toast_pkg_added: Added {id}
+home.toast_pkg_updated: Updated {id}
+home.toast_remove_cancelled: Remove cancelled.
+home.toast_removed_n: Removed {n} package(s) from the local registry.
+manage.all_match_toast: 'All {n} package(s): on-disk PKGBUILD matches upstream (under your work directory). Deleting config
+  alone does not remove those files — reuse Sync or a fresh work dir if you expected empty trees.'
+manage.aur_ssh_section: AUR SSH commands
+manage.aur_ssh_section_desc: Curated picker for the commands aur@aur.archlinux.org accepts — vote, flag, adopt, disown, list-repos,
+  and friends.
+manage.bulk_download_btn: Download {n} missing PKGBUILD(s)
+manage.bulk_download_fail: Could not download PKGBUILD for {n_fail} package(s). Use Sync per package for details.
+manage.bulk_download_ok: Downloaded PKGBUILD for {n_ok} package(s).
+manage.bulk_download_partial: Downloaded {n_ok} PKGBUILD(s); {n_fail} failed — use Sync or Edit package for failing rows.
+manage.bulk_download_tooltip: 'Same as Sync: fetch each package’s PKGBUILD URL into its working directory.'
+manage.check_all: Check all
+manage.check_all_sub: Fetches each registry PKGBUILD URL and compares it to the PKGBUILD already on disk under your work directory
+  (or per-package destination). Clearing config does not delete those files — if you want a clean tree, use Sync or remove
+  the old folders.
+manage.check_all_title: Check all packages for upstream updates
+manage.close: Close
+manage.coming_soon: 'Coming soon: {what}'
+manage.empty_registry_sub: Use the home screen's “Add package…” to register one.
+manage.empty_registry_title: No packages in the registry
+manage.failed: 'Failed: {e}'
+manage.heading: Administer AUR packages
+manage.import_dots: Import…
+manage.import_row_sub: Clone an AUR package by name and pre-fill its registry entry.
+manage.import_row_title: Import from existing AUR repo
+manage.imported: Imported {id}
+manage.lang_label_de: Deutsch
+manage.lang_label_en: English
+manage.lang_toast_de: Using German UI.
+manage.lang_toast_en: Using English UI.
+manage.language_row_sub: Saved to your config file; tab titles update immediately.
+manage.language_row_title: Display language
+manage.language_section: Language
+manage.language_section_desc: Switch between English and German for the interface.
+manage.lifecycle: Lifecycle
+manage.lifecycle_desc: Operations that affect an AUR repository as a whole.
+manage.menu.archive_preview: Archive / disown (preview)
+manage.menu.check_upstream: Check upstream PKGBUILD
+manage.menu.open_dir: Open working directory
+manage.menu.open_wizard: Open build wizard
+manage.no_packages_registry: No packages in the registry.
+manage.no_pkgbuild_url: No PKGBUILD URL — add one under Edit package.
+manage.ok_archived: Archived
+manage.ok_opened: Opened
+manage.open: Open
+manage.open_ssh_commands: Open SSH commands
+manage.open_ssh_commands_sub: Uses the SSH key configured on the connection screen.
+manage.packages_section: Packages
+manage.packages_section_desc: Per-package admin actions.
+manage.page_title: Manage packages
+manage.pkg_err_toast: '{pkg}: {err}'
+manage.preview: preview
+manage.prompt_import_title: Import AUR package
+manage.render_admin_err: '{label}: {err}'
+manage.render_admin_ok: '{label}: OK'
+manage.subtitle: Import existing AUR repositories and check for upstream updates. “Register new AUR package” lives on the
+  Home tab. Lifecycle actions tagged “preview” are stubbed and will land in a future release.
+manage.upstream_ok_toast: '{pkg}: on-disk PKGBUILD matches upstream (pkgver {version}).'
+manage.upstream_title_diff: Upstream check — review diffs
+manage.upstream_title_report: Upstream check — report
+manage.upstream_toast: One or more packages differ from upstream or failed — see the report window.
+manage.upstream_window_title: '{pkg} — PKGBUILD vs upstream'
+manage.upstream_diff_body: |-
+  pkgver: {local} (local) → {upstream} (upstream)
+
+  Diff (same style as Publish “Diff vs HEAD”):
+
+  {diff}
+manage.bulk_report_col_package: Package
+manage.bulk_report_col_status: Status
+manage.bulk_report_col_details: Details
+manage.bulk_report_status_up_to_date: up to date
+manage.bulk_report_status_outdated: outdated
+manage.bulk_report_status_preview: preview
+manage.bulk_report_status_error: error
+manage.bulk_report_pkgver: 'pkgver {version}'
+manage.bulk_report_pkgver_cmp: 'pkgver: {local} (local) → {upstream} (upstream)'
+manage.bulk_report_diff_heading: |-
+  === {id} (PKGBUILD vs upstream) ===
+
+  {diff}
+manage.workdir_required_toast: Set a working directory first.
+onboarding.empty_row_subtitle: Enter your username above and press Fetch.
+onboarding.empty_row_title: Nothing fetched yet
+onboarding.fetch_button: Fetch
+onboarding.fetch_row_subtitle: Queries the AUR for packages you own or co-maintain.
+onboarding.fetch_row_title: Fetch maintained packages
+onboarding.heading: Sign in with your AUR username
+onboarding.import_continue: Import & continue to SSH
+onboarding.no_description: (no description)
+onboarding.no_packages_row_subtitle: Double-check your username, or register a package on the AUR first.
+onboarding.no_packages_row_title: No packages found
+onboarding.ood_tooltip: Flagged out-of-date on the AUR
+onboarding.page_title: Onboarding
+onboarding.results_desc: Tick the packages you want to administer from here.
+onboarding.results_title: Your packages
+onboarding.section_login: Login
+onboarding.section_login_desc: No password is exchanged. Your SSH key is set up separately on the AUR connection screen —
+  that's what authenticates pushes. Brand-new AUR accounts are sometimes held for manual anti-spam review; if login on the
+  website fails, wait for approval before pasting SSH keys.
+onboarding.skip: Skip setup
+onboarding.skip_tooltip: Skips package import and SSH setup. You can revisit both from home later.
+onboarding.subtitle: Login here is just your aur.archlinux.org username — the public AUR RPC uses it to list what you maintain.
+  When you later push a release, your SSH key is what actually verifies you.
+onboarding.toast_aur_said: 'AUR said: {msg}'
+onboarding.toast_enter_username: Enter your AUR username first.
+onboarding.toast_fetch_failed: 'Fetch failed: {err}'
+onboarding.toast_found_n: Found {n} package(s)
+onboarding.toast_imported_n: Imported {n} package(s)
+onboarding.toast_no_packages: No packages found for this user
+onboarding.toast_select_one: Select at least one package.
+onboarding.username_title: AUR username
+package.hint.bin_suffix: 'AUR convention: with Kind “binary”, the pkgbase usually ends with “-bin”. You can still save—this
+  is only a hint.'
+package.hint.git_suffix: 'AUR convention: with Kind “git”, the pkgbase usually ends with “-git”. You can still save—this is
+  only a hint.'
+package.kind.bin: binary
+package.kind.git: git
+package.kind.other: source
+package.stale.never_recorded: No PKGBUILD download or Reload from disk is recorded yet for this package. Use Sync or Reload
+  before trusting this tree.
+package.stale.old: The PKGBUILD was last downloaded or reloaded from disk over a day ago. Sync or Reload so you are not editing
+  an outdated file.
+package_editor.name_found_aur: Package found on AUR
+package_editor.name_on_aur: Name already on the AUR
+package_editor.name_unavailable: Name unavailable
+package_editor.optional_detail: Optional — {detail}
+package_editor.window.edit: Edit package
+package_editor.window.define_aur: Define package for AUR
+package_editor.window.add: Add package
+package_editor.cancel: Cancel
+package_editor.save: Save
+package_editor.pkgbase_field_hint: 'Use the pkgbase (AUR repository name), not a split pkgname. Example: my-pkg-bin.'
+package_editor.field.pkgbase_new: AUR pkgbase (repository name) *
+package_editor.field.pkgbase_edit: AUR pkgbase (repository name)
+package_editor.field.title: Display title — app-only (not PKGBUILD or AUR); if empty, the pkgbase is used
+package_editor.field.subtitle: Short description — app-only; optional second line on Home
+package_editor.favorite_title: Favorite on Home
+package_editor.favorite_sub: List this package under Favorites at the top of the Home tab (right-click also works).
+package_editor.field.url_new: PKGBUILD URL (raw) *
+package_editor.field.url_edit: PKGBUILD URL (raw)
+package_editor.url_tooltip: Raw PKGBUILD file URL for the Sync tab. Optional for brand-new Register—add later via Edit package.
+package_editor.dest_title: Destination (PKGBUILD path)
+package_editor.browse: Browse…
+package_editor.use_default: Use default
+package_editor.icon_title: Icon name — app-only; optional freedesktop icon (if empty, Kind picks it)
+package_editor.kind_title: Kind
+package_editor.kind_sub: App-only; default list icon when Icon name is empty. Does not change makepkg.
+package_editor.section_package: Package
+package_editor.blurb_register: 'Required fields are marked with *. Set the pkgbase and where your PKGBUILD lives on disk. After
+  saving, return to the Register wizard to validate and push— that creates the AUR Git repository. You can add an upstream
+  PKGBUILD URL later with Edit package if you use Sync.'
+package_editor.blurb_new: 'Required fields are marked with *. When the pkgbase is ready, use Publish to clone the AUR repository
+  (if needed) and push; there is no separate approval queue. A first-time Git warning about an empty repository is normal until
+  the first accepted push.'
+package_editor.blurb_edit: Required fields are marked with *. Display title, short description, and icon name are app-only (not
+  PKGBUILD or AUR); leave display title empty to use the pkgbase.
+pkgbuild_editor.banner_no_home_pkg: No package is selected on Home.
+pkgbuild_editor.btn_apply: Apply quick fields
+pkgbuild_editor.btn_reload: Reload
+pkgbuild_editor.btn_save: Save
+pkgbuild_editor.btn_srcinfo: .SRCINFO
+pkgbuild_editor.diff_more_removed: … (more removed lines not shown)
+pkgbuild_editor.field.arch: arch — space-separated tokens → array
+pkgbuild_editor.field.conflicts: conflicts — space-separated
+pkgbuild_editor.field.depends: depends — space-separated package names
+pkgbuild_editor.field.license: license — space-separated → array
+pkgbuild_editor.field.maintainer: Maintainer — # Maintainer: … (name <email>)
+pkgbuild_editor.field.makedepends: makedepends — build deps, space-separated
+pkgbuild_editor.field.optdepends: optdepends — optional deps, space-separated (use text view for multi-word reasons)
+pkgbuild_editor.field.pkgdesc: pkgdesc — description (auto-quoted if needed)
+pkgbuild_editor.field.pkgname: pkgname — should match AUR id “{id}”
+pkgbuild_editor.field.pkgrel: pkgrel — release integer
+pkgbuild_editor.field.pkgver: pkgver — upstream version
+pkgbuild_editor.field.provides: provides — space-separated
+pkgbuild_editor.field.source: source — single-line tokens; use text view for long URLs
+pkgbuild_editor.field.url: url — upstream / project URL
+pkgbuild_editor.full_label: Full PKGBUILD (prepare, build, check, package, …)
+pkgbuild_editor.no_pkg_banner: Pick a destination folder on the Sync tab, or set a working directory on Connection.
+pkgbuild_editor.path_row_title: PKGBUILD path
+pkgbuild_editor.quick_subtitle: Whitespace-separated tokens become bash arrays. Use the text view for functions.
+pkgbuild_editor.quick_title: Quick metadata
+pkgbuild_editor.removed_caption: Removed lines vs last load/save (like git −)
+pkgbuild_editor.section_desc: Reload loads the file from disk into the editor. Save writes the buffer. “Apply quick fields”
+  merges the rows above into the full text (single-line assignments only — review the buffer afterward). Edit functions such
+  as prepare(), build(), and package() in the full editor. Green highlights mark new lines vs the last load/save; removed
+  lines appear in the red panel.
+pkgbuild_editor.section_subtitle_need_pkg: Select a package on Home to use this editor.
+pkgbuild_editor.section_title: Edit PKGBUILD
+pkgbuild_editor.srcinfo_tooltip: Run makepkg --printsrcinfo in this directory (after Save).
+pkgbuild_editor.stub_hint_register: '# No PKGBUILD on disk yet — use “Create starter PKGBUILD” on the Register page, or paste
+  here and Save.'
+pkgbuild_editor.stub_hint_version: '# No PKGBUILD on disk yet — use the Sync tab to download one, or paste here and Save.'
+pkgbuild_editor.stub_no_dir: '# Pick a destination folder on the Sync tab, or set a working directory on Connection.'
+pkgbuild_editor.toast_loaded: PKGBUILD loaded
+pkgbuild_editor.toast_merge_quick: Quick fields merged into the editor — review the full text, then Save.
+pkgbuild_editor.toast_no_path: No PKGBUILD path is configured for this package.
+pkgbuild_editor.toast_no_pkg: No package is available for this editor.
+pkgbuild_editor.toast_no_pkgbuild_disk: No PKGBUILD on disk yet
+pkgbuild_editor.toast_reload_hint: Use Reload after external edits.
+pkgbuild_editor.toast_saved: PKGBUILD saved
+pkgbuild_editor.toast_set_workdir: Set a working directory on Connection or pick a destination folder on Sync.
+pkgbuild_editor.toast_srcinfo_fail: '.SRCINFO failed: {e}'
+pkgbuild_editor.toast_wrote: Wrote {path}
+preflight.rows.base-devel.install_hint: pacman -S --needed base-devel
+preflight.rows.base-devel.purpose: packaging meta-group on this system
+preflight.rows.devtools.install_hint: pacman -S --needed devtools
+preflight.rows.devtools.purpose: clean chroot builds (recommended before pushing to the AUR)
+preflight.rows.fakeroot.install_hint: pacman -S --needed base-devel
+preflight.rows.fakeroot.purpose: makepkg --fakeroot / packaging checks (ships in base-devel)
+preflight.rows.git.install_hint: pacman -S --needed git
+preflight.rows.git.purpose: clone and push the AUR repo
+preflight.rows.makepkg.install_hint: pacman -S --needed base-devel
+preflight.rows.makepkg.purpose: build Arch packages
+preflight.rows.ssh.install_hint: pacman -S --needed openssh
+preflight.rows.ssh.purpose: talk to aur.archlinux.org
+preflight.rows.updpkgsums.install_hint: pacman -S --needed pacman-contrib
+preflight.rows.updpkgsums.purpose: refresh sha256sums in the PKGBUILD
+publish.page_title: Publish
+publish.heading: 'Publish — {title}'
+publish.subtitle: 'Prepare clones (or reuses) the AUR Git repository at {url}. For a brand-new pkgbase, Git may warn that you
+  cloned an empty repository—that is expected until the server accepts your first push (see the Arch wiki AUR submission
+  guidelines).
+
+
+  Prepare runs the same validation + .SRCINFO regeneration as Register, clones (or reuses) the AUR repo, stages PKGBUILD
+  and .SRCINFO from your Sync directory into that clone, shows the diff, then you can commit and push.'
+publish.expectations_title: Publication expectations
+publish.expectations_sub: 'The AUR is not moderated before publication: when your push succeeds, the updated sources are
+  public. Asking for review on the Arch forums or mailing lists is encouraged when you are unsure, but it is voluntary and
+  does not block or replace your own checks before you push.'
+publish.banner_ssh_title: 'SSH is not verified yet. You can edit the PKGBUILD, build locally, and regenerate .SRCINFO, but
+  committing and pushing is disabled.'
+publish.commit_message_row_title: Commit message
+publish.default_template_row_title: Default template
+publish.default_desc_builtin: '{template}   (built-in fallback)'
+publish.default_desc_saved: '{template}   (your saved template)'
+publish.save_default_btn: Save as default
+publish.reset_default_btn: Reset to default
+publish.commit_section_title: Commit message
+publish.commit_section_sub: 'Pre-filled from your default template (use {pkg} to insert the package name). Edit here to change
+  just this commit, or press “Save as default” to update the template for future commits.'
+publish.stage_btn: Prepare (validate + clone + .SRCINFO + diff)
+publish.stage_tooltip_no_ssh: Set up and verify SSH first.
+publish.stage_tooltip_ok: 'Runs required validation checks and regenerates .SRCINFO, clones the AUR repo if needed (an
+  empty-repo warning on first clone is normal for a new pkgbase), then stages files and shows the diff.'
+publish.push_btn: Commit and push
+publish.push_tooltip_no_ssh: Set up and verify SSH first.
+publish.push_tooltip_ok: 'Runs after Prepare: commits PKGBUILD + .SRCINFO and pushes to the AUR. A successful push publishes
+  immediately—there is no separate approval step. Enabled only when the clone differs from HEAD.'
+publish.diff_heading: Diff vs HEAD
+publish.log_title: Publish log
+publish.log_subtitle: git status, diff, commit, and push transcripts from the actions above appear here.
+publish.toast_could_not_resolve_dir: Could not resolve the package directory — check Sync destination or Connection.
+publish.toast_default_saved: Default commit message saved
+publish.toast_enter_message: Enter a message before saving.
+publish.toast_git_init_hint: Git repo missing or empty — use Register or Sync first.
+publish.toast_git_status_hint: Git status failed — fix the tree before pushing.
+publish.toast_no_changes_vs_aur: No changes vs AUR — nothing to commit or push
+publish.toast_no_message: Enter a commit message.
+publish.toast_no_workdir: No working directory configured.
+publish.toast_push_failed: 'Push failed: {e}'
+publish.toast_push_ready: Ready to push — review the diff; push publishes immediately
+publish.toast_pushed: Pushed to AUR — run Prepare again after new edits
+publish.toast_reset_default: Reset to default
+publish.toast_save_config_failed: 'Could not save config: {e}'
+register.alert_push_body: When the push succeeds, the PKGBUILD and .SRCINFO become public on the AUR. There is no separate
+  approval step. Confirm only if you are ready to publish.
+register.alert_push_title: Push to the AUR?
+register.banner_ssh_btn: Set up SSH
+register.banner_ssh_title: SSH is not verified yet. Set up SSH on the Connection tab before cloning or pushing to the AUR.
+register.btn_close: Close
+register.btn_define: Define package…
+register.btn_edit: Edit PKGBUILD…
+register.btn_edit_tooltip: 'When SSH is ready: enabled after a remote check finds PKGBUILD on the AUR Git repo, or when
+  PKGBUILD already exists locally. Opens the same editor as the Version tab.'
+register.btn_prepare: Validate, clone, and stage
+register.btn_prepare_tooltip_no_ssh: Set up and verify SSH first (clone uses SSH).
+register.btn_prepare_tooltip_ssh: Runs namespace checks, validation, .SRCINFO, git clone, and stages into the AUR clone.
+  Push is separate.
+register.btn_push: Commit and push to AUR
+register.btn_push_tooltip_no_ssh: Set up and verify SSH first.
+register.btn_push_tooltip_ssh: Enabled after a successful prepare. Commits “Initial import” and pushes — publishes
+  immediately.
+register.btn_starter: Create starter PKGBUILD
+register.btn_starter_tooltip: 'When SSH is ready: enabled only after a remote check shows the AUR Git repo has no PKGBUILD
+  yet. Otherwise: enabled when PKGBUILD is missing locally. Writes a minimal PKGBUILD, then opens the editor.'
+register.chk_history: Allow existing remote Git history (deleted pkgbase recovery)
+register.chk_history_tooltip: When the AUR Git remote already has commits, enable this before Prepare if you intend to
+  continue. Changing this after a successful prepare clears the push step until you run Prepare again.
+register.editor_title: Edit PKGBUILD — {id}
+register.heading: Register new AUR package
+register.log_subtitle: 'Prepare: namespace, validation, clone, and staging. Push: commit and git output.'
+register.log_title: Register log
+register.nav_title: Register
+register.response_push: _Commit and push
+register.row_package_subtitle: Create or overwrite the registry row from the editor.
+register.row_package_title: Package
+register.row_pkgbuild_subtitle: 'With SSH ready, the app probes the AUR Git remote (shallow clone) because the persistent clone
+  does not exist yet — **Create starter** only when the remote has no PKGBUILD; **Edit** when it does or when a local file
+  exists. Without SSH, buttons follow local files only.'
+register.row_pkgbuild_title: PKGBUILD
+register.subtitle: Define the pkgbase and destination folder, then create a starter PKGBUILD if the file is missing and edit
+  it here (same editor as the Version tab). Run Validate / clone / stage when ready, then Commit and push. This flow does not
+  use the package selected on the Home list.
+register.summary_empty: No package defined yet — use “Define package…”.
+register.summary_ready: 'Ready: {id} — {title}'
+register.toast_define_first: Define a package first.
+register.toast_define_prepare: Define a package before preparing.
+register.toast_define_push: Define a package before pushing.
+register.toast_editor_open: Could not open editor window.
+register.toast_gitinspect_fail: 'Could not inspect AUR Git for PKGBUILD: {err}'
+register.toast_no_confirm: Could not open confirmation dialog.
+register.toast_pick_dest: Pick a destination folder (Define package…) so the PKGBUILD path is known.
+register.toast_prepare_before_push: Run “Validate, clone, and stage” successfully before pushing.
+register.toast_prepare_done: Prepare finished — review the log, then use Commit and push when ready.
+register.toast_registered: Registered {id} on the AUR — opened on Home for Publish or Validate.
+register.toast_saved: Saved {id} to the local registry.
+register.toast_starter_fail: 'Could not create starter: {err}'
+register.toast_starter_skipped: PKGBUILD already exists — starter was not written. Use Edit PKGBUILD or delete the file first.
+register.toast_starter_wrote: Wrote starter PKGBUILD for {id} — opened the editor; run Prepare when ready.
+register.toast_workdir_first: Set a working directory on the Connection tab first.
+shell.connection_bad_tooltip: Something needs attention — open Connection for details and fix hints
+shell.connection_ok_tooltip: Required tools and AUR SSH look OK
+shell.go_home: Go to Home
+shell.home_tab_0: Home - (0 Packages)
+shell.home_tab_1: Home - (1 Package)
+shell.home_tab_n: Home - ({n} Packages)
+shell.pick_package_hint: Pick a package on the Home tab first.
+shell.root_page_title: AUR Builder
+shell.sync_tab_pkg: Sync - {pkg}
+shell.sync_tab_plain: Sync
+shell.tab.build: Build
+shell.tab.connection: Connection
+shell.tab.home: Home
+shell.tab.manage: Manage
+shell.tab.publish: Publish
+shell.tab.sync: Sync
+shell.tab.validate: Validate
+shell.tab.version: Version
+shell.validate_bad_tooltip: Required validation reported issues — open Validate for details
+shell.validate_ok_tooltip: Required validation tier passed
+shell.version_pkgver: Version - {v}
+shell.version_plain: Version
+ssh_setup.toast_generated_aur: Generated ~/.ssh/aur
+ssh_setup.toast_key_selected: SSH key selected for AUR
+ssh_setup.toast_known_hosts_added: AUR host keys added to known_hosts
+ssh_setup.toast_known_hosts_trusted: AUR already trusted in known_hosts
+ssh_setup.toast_no_display_copy: No display to copy to
+ssh_setup.toast_opened_browser: Opened in your browser
+ssh_setup.toast_opened_profile: Opened your AUR account in the browser
+ssh_setup.toast_opened_register: Opened AUR registration in your browser
+ssh_setup.toast_public_copied: Public key copied
+ssh_setup.toast_reused_aur: Reused existing ~/.ssh/aur
+ssh_setup.toast_select_key: Select an SSH key first.
+ssh_setup.toast_select_or_create_key: Select or create an SSH key first.
+ssh_setup.toast_ssh_config_created: Created ~/.ssh/config
+ssh_setup.toast_ssh_config_ok: ~/.ssh/config already correct
+ssh_setup.toast_ssh_config_updated: Updated ~/.ssh/config
+ssh_setup.toast_username_cleared: Username was cleared.
+ssh_setup.page_title: SSH setup
+ssh_setup.heading: Set up SSH verification for the AUR
+ssh_setup.subtitle: Create (or reuse) ~/.ssh/aur, write the matching Host block into ~/.ssh/config, and pin the server's host
+  key into ~/.ssh/known_hosts.
+ssh_setup.keys_heading: Your SSH keys
+ssh_setup.keys_desc: Detected under ~/.ssh. Click “Use for AUR” to select one.
+ssh_setup.one_click_section: One-click setup
+ssh_setup.one_click_section_desc: Runs the three steps below in order. Safe to click repeatedly — existing files are reused
+  rather than overwritten.
+ssh_setup.one_click_row_title: Set up key + config + known_hosts
+ssh_setup.one_click_row_sub: Creates ~/.ssh/aur, adds a Host block, pins the AUR host key.
+ssh_setup.btn_run_setup: Run setup
+ssh_setup.setup_failed: 'Setup failed: {err}'
+ssh_setup.setup_line_key_reused: 'Key: reused {path}'
+ssh_setup.setup_line_key_generated: 'Key: generated {path}'
+ssh_setup.setup_line_config_created: 'Config: created ~/.ssh/config'
+ssh_setup.setup_line_config_updated: 'Config: updated ~/.ssh/config'
+ssh_setup.setup_line_config_ok: 'Config: already correct'
+ssh_setup.setup_line_hosts_ok: 'known_hosts: already trusts the AUR'
+ssh_setup.setup_line_hosts_added_plain: 'known_hosts: added AUR host keys (fingerprints verified against published list)'
+ssh_setup.setup_line_hosts_added_fp: 'known_hosts: added verified keys — {fp}'
+ssh_setup.keys_empty_title: No SSH keys found
+ssh_setup.keys_empty_sub: Run the one-click setup above to create ~/.ssh/aur.
+ssh_setup.keys_list_failed: 'Failed to list keys: {err}'
+ssh_setup.key_no_comment: no comment
+ssh_setup.key_fp_unavailable: fingerprint unavailable
+ssh_setup.key_btn_selected: Selected
+ssh_setup.key_btn_use: Use for AUR
+ssh_setup.key_section_title: AUR key (~/.ssh/aur)
+ssh_setup.key_section_desc: Reuses the file if it already exists; otherwise generates a new ed25519 key with an empty
+  passphrase for non-interactive use. For stronger protection, run ssh-keygen yourself with a passphrase, then select that key
+  with “Use for AUR”.
+ssh_setup.ensure_row_title: Ensure ~/.ssh/aur
+ssh_setup.ensure_row_sub: Never overwrites an existing key.
+ssh_setup.btn_ensure_key: Ensure key
+ssh_setup.ssh_add_row_title: Load selected key into ssh-agent
+ssh_setup.ssh_add_row_sub: Runs ssh-add on the key from your config (empty-passphrase keys work non-interactively). The Check
+  agent row below is refreshed automatically after a successful add.
+ssh_setup.btn_ssh_add: ssh-add
+ssh_setup.agent_row_title: List keys in ssh-agent
+ssh_setup.agent_row_sub: Runs ssh-add -l. If the desktop has no SSH_AUTH_SOCK, the first run can start ssh-agent -s and keep
+  that socket for this app session.
+ssh_setup.btn_check_agent: Check agent
+ssh_setup.stamp_adding: Adding…
+ssh_setup.stamp_checking: Checking…
+ssh_setup.stamp_working: Working…
+ssh_setup.stamp_updating: Updating…
+ssh_setup.stamp_writing: Writing…
+ssh_setup.stamp_list_refresh_failed: List refresh failed
+ssh_setup.stamp_failed: Failed
+ssh_setup.stamp_generated: Generated
+ssh_setup.stamp_reused: Reused
+ssh_setup.stamp_already_trusted: Already trusted
+ssh_setup.stamp_keys_added: Keys added
+ssh_setup.stamp_created: Created
+ssh_setup.stamp_updated: Updated
+ssh_setup.stamp_unchanged: Unchanged
+ssh_setup.stamp_needs_key: Needs key
+ssh_setup.stamp_na: N/A
+ssh_setup.tip_hosts_present: AUR host keys already present in known_hosts.
+ssh_setup.tip_wrote_config: Wrote ~/.ssh/config with the AUR Host block.
+ssh_setup.tip_refreshed_config: Refreshed the AUR Host block in ~/.ssh/config.
+ssh_setup.tip_config_ok: ~/.ssh/config already had the correct AUR Host entry.
+ssh_setup.tip_select_key: Select or create an SSH key in the rows above.
+ssh_setup.toast_refresh_agent_list: 'Could not refresh agent list: {detail}'
+ssh_setup.toast_key_setup_failed: 'Key setup failed: {err}'
+ssh_setup.started_embedded_agent: Started a new ssh-agent for this session (no desktop agent was reachable).
+ssh_setup.publish_section: Publish to AUR
+ssh_setup.publish_section_desc: Copy your public key into the AUR account page so the server accepts your pushes. The AUR
+  accepts multiple keys — paste each on its own line in the SSH Public Key field.
+ssh_setup.copy_row_title: Copy public key to clipboard
+ssh_setup.copy_row_sub: Uses the key selected above.
+ssh_setup.btn_copy: Copy
+ssh_setup.open_row_title: Open your AUR account (edit profile)
+ssh_setup.open_row_sub: Opens your account edit page when an AUR username is set on Connection. If none is set, a dialog lets
+  you enter and save one (same AUR check as Connection) or open registration.
+ssh_setup.btn_open: Open
+ssh_setup.toast_set_username_connection: Set your AUR username on the Connection screen, then try Open again.
+ssh_setup.toast_read_key_fail: 'Could not read key: {err}'
+ssh_setup.toast_profile_open_fail: 'Profile did not open: {err}'
+ssh_setup.toast_open_fail: 'Open failed: {err}'
+ssh_setup.dialog_username_title: AUR username not set
+ssh_setup.dialog_username_body: |-
+  No AUR username is saved yet. Enter your login below and choose Save and open — the app checks it with the AUR the same way
+  as on the Connection screen, then opens your profile so you can paste your SSH public key.
+
+  Continue opens the AUR registration page if you still need an account.
+ssh_setup.dialog_username_field: AUR username
+ssh_setup.dialog_cancel: Cancel
+ssh_setup.dialog_continue: Continue
+ssh_setup.dialog_save_open: Save and open
+ssh_setup.dialog_enter_username: Enter your AUR username to save, or choose Continue for the signup page.
+ssh_setup.toast_verify_save_fail: 'Could not verify username — not saved: {e}'
+ssh_setup.toast_verified_save_config_fail: 'Verified but could not save config: {e}'
+ssh_setup.toast_username_saved_all: 'Username saved. All {registered_len} registered package(s) appear under this account ({n} from AUR RPC, maintainer or co-maintainer).'
+ssh_setup.toast_username_saved_partial: 'Username saved. {k} package(s) are not listed for this account on the AUR (maintainer/co-maintainer RPC): {list}'
+ssh_setup.probe_section: Verify with AUR server
+ssh_setup.probe_section_desc: A successful probe means your SSH key is registered on the AUR.
+ssh_setup.probe_row_title: Test SSH connection
+ssh_setup.probe_row_sub: ssh -T aur@aur.archlinux.org
+ssh_setup.btn_run_test: Run test
+ssh_setup.connectivity_section: Connectivity
+ssh_setup.connectivity_section_desc: Client-side tweaks that make SSH to aur.archlinux.org seamless.
+ssh_setup.trust_row_title: Trust aur.archlinux.org host key
+ssh_setup.trust_row_sub: Runs ssh-keyscan, checks SHA256 fingerprints against the list on aur.archlinux.org (with a bundled
+  fallback), then appends to known_hosts if missing.
+ssh_setup.btn_update_known_hosts: Update known_hosts
+ssh_setup.config_row_title: Configure ~/.ssh/config for AUR
+ssh_setup.config_row_sub: Adds or refreshes the Host block for the selected key.
+ssh_setup.btn_write_entry: Write entry
+ssh_setup.coming_soon_detail: 'Coming soon: {what}'
+ssh_setup.done_back_connection: Back to connection test
+ssh_setup.done_hint_connection: Re-run the SSH probe to confirm.
+ssh_setup.done_back_onboarding: Finish onboarding
+ssh_setup.done_hint_onboarding: Run the SSH test above (or on Connection) if publish still says SSH is unverified.
+ssh_setup.op_failed: 'Failed: {err}'
+sync.browse: Browse…
+sync.choose_destination: Choose destination folder
+sync.dest_row_title: Destination directory
+sync.heading: Sync PKGBUILD — {title}
+sync.row.destination: Destination (PKGBUILD path)
+sync.row.source: Source
+sync.src_row_title: PKGBUILD source URL
+sync.status_downloading: downloading…
+sync.status_precheck: Checking whether PKGBUILD is available at the source…
+sync.status_source_bad: 'Cannot download PKGBUILD yet: {msg}'
+sync.status_source_ok: PKGBUILD is available at this URL. Set a destination if needed, then download.
+sync.subtitle: Download the PKGBUILD for {id} from its configured source into the destination folder.
+sync.toast_bad_path: That folder path is not usable — pick an absolute path without ..
+sync.toast_default_dest: Using default destination
+sync.toast_dest_saved: Destination saved
+sync.toast_download_disabled: 'Download PKGBUILD is disabled: {msg}'
+sync.toast_download_failed: Download failed
+sync.toast_downloaded: PKGBUILD downloaded
+sync.toast_folder_picker: Could not open folder picker.
+sync.toast_no_dir_for_download: Set a working directory on Connection or browse for a destination folder.
+sync.toast_registry_save: 'Could not save registry: {e}'
+sync.toast_url_precheck_fail: '{e}'
+sync.use_default: Use default
+sync.use_default_tooltip: Clear the saved folder — use working directory + package id (or legacy relative path).
+sync.section_publish_title: Sync and Publish
+sync.section_publish_desc: Publish copies PKGBUILD and .SRCINFO from the destination below into the AUR Git clone, then commits
+  when you choose. A successful push updates the public AUR immediately. On a brand-new pkgbase, the first clone may warn that
+  the repository is empty—that is expected.
+sync.btn_download: Download PKGBUILD
+sync.btn_continue: Continue
+sync.page_title: Sync PKGBUILD
+sync.status_saved_to: 'saved to {path}'
+sync.status_error: 'error: {err}'
+validate.page_title: Validate
+validate.heading: 'Validate PKGBUILD — {title}'
+validate.subtitle: Required checks run automatically when you open this page (when the package directory is known — working
+  directory or an absolute destination on Sync). Use “Run all checks” to include optional lints. Failures in required checks
+  will very likely also fail the build.
+validate.log_title: Validation log
+validate.log_subtitle: ShellCheck, namcap, makepkg --noextract, and extended build output stream here.
+validate.section.required_title: Required
+validate.section.required_sub: Failures here block a successful makepkg.
+validate.section.optional_title: Optional lints
+validate.section.optional_sub: Quality signals. Missing tools are skipped with an install hint.
+validate.section.extended_title: Extended (fakeroot build)
+validate.section.extended_sub: Actually builds the package using fakeroot and lints the artefact. Slow — can take several
+  minutes — and produces a real .pkg.tar.* file in the working directory.
+validate.btn.lint_checks: Run Lint checks
+validate.btn.extended_build: Run extended build
+validate.btn.extended_build_tooltip: Builds the package in fakeroot. Slow.
+validate.btn.run_all: Run all checks
+validate.btn.run_extended: Run extended checks
+validate.btn.run_extended_tooltip: Builds the package in fakeroot. Slow.
+validate.btn.continue_build: Continue to build
+validate.status.running_required: running required checks…
+validate.status.running_fast: running fast checks…
+validate.status.running_optional: running optional lint checks…
+validate.status.running_extended: running extended checks — this may take a while…
+validate.row.not_run: not run
+validate.row.run: Run
+validate.row.running: running…
+validate.summary: '{pass} passed · {warn} warn · {fail} failed · {skipped} skipped'
+validate.check.bash_syntax.title: Bash syntax
+validate.check.bash_syntax.desc: Parse the PKGBUILD with `bash -n` — catches typos before makepkg.
+validate.check.print_srcinfo.title: .SRCINFO generation
+validate.check.print_srcinfo.desc: '`makepkg --printsrcinfo` — PKGBUILD must expose the expected fields.'
+validate.check.verify_source.title: Verify sources
+validate.check.verify_source.desc: '`makepkg --verifysource` — downloads and checksums every source entry.'
+validate.check.shellcheck.title: shellcheck
+validate.check.shellcheck.desc: Static analysis for PKGBUILD with makepkg-oriented shellcheck excludes (optional — install
+  `shellcheck`).
+validate.check.namcap.title: namcap (PKGBUILD)
+validate.check.namcap.desc: Arch packaging lint of the PKGBUILD (optional — install `namcap`).
+validate.check.fakeroot_build.title: Build in fakeroot
+validate.check.fakeroot_build.desc: '`makepkg -f --noconfirm` — full build using fakeroot for the package() step. Slow.'
+validate.check.namcap_package.title: namcap (built package)
+validate.check.namcap_package.desc: '`namcap -i <pkg>.pkg.tar.*` on the artefact produced by the fakeroot build.'
+validate.toast_extended_ok: Extended checks complete
+validate.toast_fakeroot_fail: Fakeroot build failed
+validate.toast_fast_ok: Fast checks complete
+validate.toast_fast_required_fail: Some required checks failed
+validate.toast_no_workdir: Set a working directory on Connection or pick a destination folder on Sync.
+validate.toast_optional_fail: Some optional lint checks failed
+validate.toast_optional_ok: Optional lint checks complete
+validate.toast_required_fail: Some required checks failed
+validate.toast_required_ok: Required checks complete
+version.checksum_row_sub: Safe to skip for git-style packages with empty source arrays.
+version.checksum_row_title: Refresh checksums
+version.checksum_run_btn: Run updpkgsums
+version.checksums_section: Checksums
+version.checksums_section_desc: Runs `updpkgsums` against the PKGBUILD in the working directory.
+version.log_updpkgsums_sub: Checksum refresh output from updpkgsums is shown below when you run it.
+version.log_updpkgsums_title: updpkgsums log
+version.toast_checksums_ok: Checksums updated in PKGBUILD
+version.toast_checksums_unchanged: Checksums already matched — PKGBUILD left unchanged
+version.toast_checksums_updated: Checksums updated in PKGBUILD
+version.toast_err: 'Error: {e}'
+version.toast_no_pkg: Pick a package on the Home tab first.
+version.toast_updpkgsums_exit: updpkgsums exited {status}
+version.toast_updpkgsums_hint: updpkgsums wants network access — run it in a terminal if this sandboxed check failed.
+version.page_title: Version
+version.heading: Version and checksums
+version.continue_validate: Continue to validate
+version.kind.bin_title: Binary package
+version.kind.bin_desc: Bump pkgver in the PKGBUILD, then refresh checksums so sha256sums match the new release assets.
+version.kind.git_title: Git package
+version.kind.git_desc: pkgver is computed automatically from `git describe`. Bump pkgrel inside the PKGBUILD only when rebuilding
+  against the same tag.
+version.kind.other_title: Source package
+version.kind.other_desc: Update pkgver / pkgrel in the PKGBUILD as appropriate, then refresh checksums if you downloaded new sources.

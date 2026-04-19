@@ -19,11 +19,11 @@ pub enum PackageKind {
 }
 
 impl PackageKind {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            PackageKind::Bin => "binary",
-            PackageKind::Git => "git",
-            PackageKind::Other => "source",
+            PackageKind::Bin => crate::i18n::t("package.kind.bin"),
+            PackageKind::Git => crate::i18n::t("package.kind.git"),
+            PackageKind::Other => crate::i18n::t("package.kind.other"),
         }
     }
 
@@ -43,18 +43,18 @@ impl PackageKind {
 ///
 /// Details:
 /// - Does not validate pkgbase characters; only checks suffix. Callers must not use this as a save gate.
-pub fn pkgbase_kind_suffix_hint(id: &str, kind: PackageKind) -> Option<&'static str> {
+pub fn pkgbase_kind_suffix_hint(id: &str, kind: PackageKind) -> Option<String> {
     let id = id.trim();
     if id.is_empty() {
         return None;
     }
     match kind {
-        PackageKind::Bin if !id.ends_with("-bin") => Some(
-            "AUR convention: with Kind “binary”, the pkgbase usually ends with “-bin”. You can still save—this is only a hint.",
-        ),
-        PackageKind::Git if !id.ends_with("-git") => Some(
-            "AUR convention: with Kind “git”, the pkgbase usually ends with “-git”. You can still save—this is only a hint.",
-        ),
+        PackageKind::Bin if !id.ends_with("-bin") => {
+            Some(crate::i18n::t("package.hint.bin_suffix"))
+        }
+        PackageKind::Git if !id.ends_with("-git") => {
+            Some(crate::i18n::t("package.hint.git_suffix"))
+        }
         _ => None,
     }
 }
@@ -119,16 +119,12 @@ pub fn pkgbuild_refresh_clock_now() -> i64 {
 ///
 /// Output:
 /// - `Some(message)` when the tree should be refreshed; `None` when no warning.
-pub fn pkgbuild_stale_message(last: Option<i64>, now_unix: i64) -> Option<&'static str> {
+pub fn pkgbuild_stale_message(last: Option<i64>, now_unix: i64) -> Option<String> {
     match last {
-        None => Some(
-            "No PKGBUILD download or Reload from disk is recorded yet for this package. \
-             Use Sync or Reload before trusting this tree.",
-        ),
-        Some(ts) if now_unix.saturating_sub(ts) >= PKGBUILD_STALE_SECS => Some(
-            "The PKGBUILD was last downloaded or reloaded from disk over a day ago. \
-             Sync or Reload so you are not editing an outdated file.",
-        ),
+        None => Some(crate::i18n::t("package.stale.never_recorded")),
+        Some(ts) if now_unix.saturating_sub(ts) >= PKGBUILD_STALE_SECS => {
+            Some(crate::i18n::t("package.stale.old"))
+        }
         _ => None,
     }
 }

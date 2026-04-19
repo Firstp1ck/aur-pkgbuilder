@@ -12,6 +12,7 @@ use adw::prelude::*;
 use adw::{ActionRow, AlertDialog, ComboRow, EntryRow, SwitchRow, Window};
 use gtk4::{Align, Box as GtkBox, Button, HeaderBar, Label, Orientation, StringList};
 
+use crate::i18n;
 use crate::runtime;
 use crate::ui;
 use crate::ui::folder_pick;
@@ -37,16 +38,13 @@ pub enum PackageEditorPurpose {
     RegisterNewAurPackage,
 }
 
-const PKGBASE_FIELD_HINT: &str =
-    "Use the pkgbase (AUR repository name), not a split pkgname. Example: my-pkg-bin.";
-
 fn refresh_kind_naming_label(label: &Label, id: &str, kind_row: &ComboRow) {
     let kind = PackageKind::all()
         .get(kind_row.selected() as usize)
         .copied()
         .unwrap_or(PackageKind::Bin);
     if let Some(tip) = package::pkgbase_kind_suffix_hint(id, kind) {
-        label.set_label(tip);
+        label.set_label(&tip);
         label.set_visible(true);
         label.set_css_classes(&["dim-label", "warning"]);
     } else {
@@ -136,23 +134,15 @@ fn apply_pkgbase_namespace_result(
         );
         return;
     }
-    set_pkgbase_feedback(id_feedback, PKGBASE_FIELD_HINT, false);
+    set_pkgbase_feedback(
+        id_feedback,
+        &i18n::t("package_editor.pkgbase_field_hint"),
+        false,
+    );
     if let Some(cb) = once.borrow_mut().take() {
         cb(pkg);
     }
     window.close();
-}
-
-/// What: Builds a preferences row title following the “required = trailing *” convention.
-///
-/// Details:
-/// - Optional rows omit ` *`; see row subtitles for “app-only” / default hints.
-fn field_title(base: &'static str, required: bool) -> String {
-    if required {
-        format!("{base} *")
-    } else {
-        base.to_string()
-    }
 }
 
 fn preview_pkg(
@@ -208,7 +198,10 @@ fn set_dest_subtitle(
     } else {
         sync_wf::destination_help_line(work_dir, &pkg)
     };
-    row.set_subtitle(&format!("Optional — {detail}"));
+    row.set_subtitle(&i18n::tf(
+        "package_editor.optional_detail",
+        &[("detail", &detail)],
+    ));
 }
 
 /// Open a modal editor. If `existing` is `Some`, the dialog edits that
@@ -242,11 +235,11 @@ pub fn open(
         .width_request(MIN_W)
         .height_request(MIN_H)
         .title(if existing.is_some() {
-            "Edit package"
+            i18n::t("package_editor.window.edit")
         } else if purpose == PackageEditorPurpose::RegisterNewAurPackage {
-            "Define package for AUR"
+            i18n::t("package_editor.window.define_aur")
         } else {
-            "Add package"
+            i18n::t("package_editor.window.add")
         })
         .build();
     if let Some(parent) = parent {
@@ -254,9 +247,11 @@ pub fn open(
     }
 
     let header = HeaderBar::new();
-    let cancel = Button::builder().label("Cancel").build();
+    let cancel = Button::builder()
+        .label(i18n::t("package_editor.cancel"))
+        .build();
     let save = Button::builder()
-        .label("Save")
+        .label(i18n::t("package_editor.save"))
         .css_classes(vec!["suggested-action"])
         .build();
     header.pack_start(&cancel);
@@ -272,7 +267,7 @@ pub fn open(
         .build();
 
     let id_feedback = Label::builder()
-        .label(PKGBASE_FIELD_HINT)
+        .label(i18n::t("package_editor.pkgbase_field_hint"))
         .wrap(true)
         .halign(Align::Start)
         .margin_bottom(4)
@@ -282,25 +277,32 @@ pub fn open(
     }
 
     let id_row = EntryRow::builder()
-        .title(field_title("AUR pkgbase (repository name)", is_new))
+        .title(if is_new {
+            i18n::t("package_editor.field.pkgbase_new")
+        } else {
+            i18n::t("package_editor.field.pkgbase_edit")
+        })
         .build();
     let title_row = EntryRow::builder()
-        .title("Display title — app-only (not PKGBUILD or AUR); if empty, the pkgbase is used")
+        .title(i18n::t("package_editor.field.title"))
         .build();
     let subtitle_row = EntryRow::builder()
-        .title("Short description — app-only; optional second line on Home")
+        .title(i18n::t("package_editor.field.subtitle"))
         .build();
     let favorite_row = SwitchRow::builder()
-        .title("Favorite on Home")
-        .subtitle("List this package under Favorites at the top of the Home tab (right-click also works).")
+        .title(i18n::t("package_editor.favorite_title"))
+        .subtitle(i18n::t("package_editor.favorite_sub"))
         .active(existing.as_ref().is_some_and(|p| p.favorite))
         .build();
+    let url_tooltip = i18n::t("package_editor.url_tooltip");
     let url_row = EntryRow::builder()
-        .title(field_title("PKGBUILD URL (raw)", pkgbuild_url_required))
+        .title(if pkgbuild_url_required {
+            i18n::t("package_editor.field.url_new")
+        } else {
+            i18n::t("package_editor.field.url_edit")
+        })
         .build();
-    url_row.set_tooltip_text(Some(
-        "Raw PKGBUILD file URL for the Sync tab. Optional for brand-new Register—add later via Edit package.",
-    ));
+    url_row.set_tooltip_text(Some(url_tooltip.as_str()));
 
     let destination_dir_state: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
         existing.as_ref().and_then(|p| p.destination_dir.clone()),
@@ -309,15 +311,15 @@ pub fn open(
     let existing_rc: Rc<Option<PackageDef>> = Rc::new(existing.clone());
 
     let dest_row = ActionRow::builder()
-        .title("Destination (PKGBUILD path)")
+        .title(i18n::t("package_editor.dest_title"))
         .build();
     let browse_btn = Button::builder()
-        .label("Browse…")
+        .label(i18n::t("package_editor.browse"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
     let default_btn = Button::builder()
-        .label("Use default")
+        .label(i18n::t("package_editor.use_default"))
         .valign(Align::Center)
         .css_classes(vec!["flat"])
         .build();
@@ -330,16 +332,17 @@ pub fn open(
     dest_row.add_suffix(&dest_btns);
 
     let icon_row = EntryRow::builder()
-        .title("Icon name — app-only; optional freedesktop icon (if empty, Kind picks it)")
+        .title(i18n::t("package_editor.icon_title"))
         .build();
 
     let kind_model = StringList::new(&[]);
     for kind in PackageKind::all() {
-        kind_model.append(kind.label());
+        let label = kind.label();
+        kind_model.append(&label);
     }
     let kind_row = ComboRow::builder()
-        .title("Kind")
-        .subtitle("App-only; default list icon when Icon name is empty. Does not change makepkg.")
+        .title(i18n::t("package_editor.kind_title"))
+        .subtitle(i18n::t("package_editor.kind_sub"))
         .model(&kind_model)
         .build();
 
@@ -375,25 +378,16 @@ pub fn open(
         *legacy_cleared.borrow(),
     );
 
-    const REQUIRED_STAR_NOTE: &str = "Required fields are marked with *. ";
     let new_package_blurb = if register {
-        format!(
-            "{REQUIRED_STAR_NOTE}Set the pkgbase and where your PKGBUILD lives on disk. After saving, return to the \
-             Register wizard to validate and push— that creates the AUR Git repository. You can add \
-             an upstream PKGBUILD URL later with Edit package if you use Sync."
-        )
+        i18n::t("package_editor.blurb_register")
     } else {
-        format!(
-            "{REQUIRED_STAR_NOTE}When the pkgbase is ready, use Publish to clone the AUR repository (if needed) \
-             and push; there is no separate approval queue. A first-time Git warning about an \
-             empty repository is normal until the first accepted push."
-        )
+        i18n::t("package_editor.blurb_new")
     };
-    let edit_package_note = "Required fields are marked with *. Display title, short description, and icon name are app-only (not PKGBUILD or AUR); leave display title empty to use the pkgbase.";
+    let edit_package_note = i18n::t("package_editor.blurb_edit");
     let pkg_section = if existing.is_some() {
         ui::collapsible_preferences_section(
-            "Package",
-            Some(edit_package_note),
+            i18n::t("package_editor.section_package"),
+            Some(edit_package_note.as_str()),
             ui::DEFAULT_SECTION_EXPANDED,
             |exp| {
                 exp.add_row(&id_feedback);
@@ -410,7 +404,7 @@ pub fn open(
         )
     } else {
         ui::collapsible_preferences_section(
-            "Package",
+            i18n::t("package_editor.section_package"),
             Some(new_package_blurb.as_str()),
             ui::DEFAULT_SECTION_EXPANDED,
             |exp| {
@@ -450,7 +444,11 @@ pub fn open(
         let kind_row_c = kind_row.clone();
         id_row.connect_changed(move |_entry| {
             if existing_for.is_none() {
-                set_pkgbase_feedback(&id_feedback_c, PKGBASE_FIELD_HINT, false);
+                set_pkgbase_feedback(
+                    &id_feedback_c,
+                    &i18n::t("package_editor.pkgbase_field_hint"),
+                    false,
+                );
             }
             refresh_kind_naming_label(&kind_naming_c, &id_row_c.text(), &kind_row_c);
             set_dest_subtitle(

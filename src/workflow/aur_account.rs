@@ -55,10 +55,10 @@ pub enum Role {
 }
 
 impl Role {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Role::Maintainer => "maintainer",
-            Role::CoMaintainer => "co-maintainer",
+            Role::Maintainer => crate::i18n::t("aur.role.maintainer"),
+            Role::CoMaintainer => crate::i18n::t("aur.role.co_maintainer"),
         }
     }
 }

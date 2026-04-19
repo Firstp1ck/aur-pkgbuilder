@@ -2,6 +2,7 @@ use adw::prelude::*;
 use adw::{Application, ApplicationWindow, NavigationView};
 
 use crate::config::Config;
+use crate::i18n;
 use crate::state::{AppState, AppStateRef};
 use crate::ui;
 use crate::workflow::registry::Registry;
@@ -28,7 +29,7 @@ pub fn build(app: &Application) {
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("AUR Builder")
+        .title(i18n::t("app.window_title"))
         .default_width(860)
         .default_height(640)
         .width_request(MIN_MAIN_W)

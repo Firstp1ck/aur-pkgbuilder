@@ -17,6 +17,8 @@ use async_channel::Sender;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+use crate::i18n;
+
 use super::build::LogLine;
 
 /// Whether the command can mutate state on the server.
@@ -98,47 +100,42 @@ impl AurSshCommand {
         }
     }
 
-    /// Human-readable label for UI rows.
-    pub fn title(self) -> &'static str {
-        match self {
-            AurSshCommand::Help => "Help — list available commands",
-            AurSshCommand::ListRepos => "List my AUR repositories",
-            AurSshCommand::Vote => "Vote",
-            AurSshCommand::Unvote => "Unvote",
-            AurSshCommand::Flag => "Flag out-of-date",
-            AurSshCommand::Unflag => "Unflag (clear out-of-date)",
-            AurSshCommand::Notify => "Enable notifications",
-            AurSshCommand::Unnotify => "Disable notifications",
-            AurSshCommand::Adopt => "Adopt (orphan → me)",
-            AurSshCommand::Disown => "Disown",
-            AurSshCommand::SetupRepo => "Create empty AUR repository",
-            AurSshCommand::SetComaintainers => "Set co-maintainers",
-            AurSshCommand::SetKeywords => "Set keywords",
-        }
+    /// Human-readable label for UI rows (follows active UI locale).
+    pub fn title(self) -> String {
+        i18n::t(match self {
+            AurSshCommand::Help => "aur_ssh.cmd.help.title",
+            AurSshCommand::ListRepos => "aur_ssh.cmd.list_repos.title",
+            AurSshCommand::Vote => "aur_ssh.cmd.vote.title",
+            AurSshCommand::Unvote => "aur_ssh.cmd.unvote.title",
+            AurSshCommand::Flag => "aur_ssh.cmd.flag.title",
+            AurSshCommand::Unflag => "aur_ssh.cmd.unflag.title",
+            AurSshCommand::Notify => "aur_ssh.cmd.notify.title",
+            AurSshCommand::Unnotify => "aur_ssh.cmd.unnotify.title",
+            AurSshCommand::Adopt => "aur_ssh.cmd.adopt.title",
+            AurSshCommand::Disown => "aur_ssh.cmd.disown.title",
+            AurSshCommand::SetupRepo => "aur_ssh.cmd.setup_repo.title",
+            AurSshCommand::SetComaintainers => "aur_ssh.cmd.set_comaintainers.title",
+            AurSshCommand::SetKeywords => "aur_ssh.cmd.set_keywords.title",
+        })
     }
 
-    pub fn description(self) -> &'static str {
-        match self {
-            AurSshCommand::Help => "Prints the server's built-in help text.",
-            AurSshCommand::ListRepos => {
-                "Lists every AUR git repository your key has push access to."
-            }
-            AurSshCommand::Vote => "Vote for a package.",
-            AurSshCommand::Unvote => "Remove your vote for a package.",
-            AurSshCommand::Flag => "Flag a package as out-of-date with an optional reason.",
-            AurSshCommand::Unflag => "Clear the out-of-date flag you set.",
-            AurSshCommand::Notify => "Receive notifications for package updates and comments.",
-            AurSshCommand::Unnotify => "Stop receiving notifications for this package.",
-            AurSshCommand::Adopt => "Claim an orphaned package you want to maintain.",
-            AurSshCommand::Disown => "Give up your maintainer role for a package.",
-            AurSshCommand::SetupRepo => {
-                "Create an empty AUR git repo. First-time package registration."
-            }
-            AurSshCommand::SetComaintainers => {
-                "Replace the co-maintainer list. Usernames, space-separated."
-            }
-            AurSshCommand::SetKeywords => "Replace the package keywords. Space-separated.",
-        }
+    /// Longer help line for UI rows (follows active UI locale).
+    pub fn description(self) -> String {
+        i18n::t(match self {
+            AurSshCommand::Help => "aur_ssh.cmd.help.desc",
+            AurSshCommand::ListRepos => "aur_ssh.cmd.list_repos.desc",
+            AurSshCommand::Vote => "aur_ssh.cmd.vote.desc",
+            AurSshCommand::Unvote => "aur_ssh.cmd.unvote.desc",
+            AurSshCommand::Flag => "aur_ssh.cmd.flag.desc",
+            AurSshCommand::Unflag => "aur_ssh.cmd.unflag.desc",
+            AurSshCommand::Notify => "aur_ssh.cmd.notify.desc",
+            AurSshCommand::Unnotify => "aur_ssh.cmd.unnotify.desc",
+            AurSshCommand::Adopt => "aur_ssh.cmd.adopt.desc",
+            AurSshCommand::Disown => "aur_ssh.cmd.disown.desc",
+            AurSshCommand::SetupRepo => "aur_ssh.cmd.setup_repo.desc",
+            AurSshCommand::SetComaintainers => "aur_ssh.cmd.set_comaintainers.desc",
+            AurSshCommand::SetKeywords => "aur_ssh.cmd.set_keywords.desc",
+        })
     }
 
     pub fn severity(self) -> Severity {
@@ -172,14 +169,14 @@ impl AurSshCommand {
 
     /// Hint shown below the shared "extra args" entry when this command is
     /// the subject of a click.
-    pub fn args_hint(self) -> Option<&'static str> {
+    pub fn args_hint(self) -> Option<String> {
         match self.args_shape() {
             ArgsShape::None => None,
-            ArgsShape::OneArg => Some("free-form reason (optional)"),
+            ArgsShape::OneArg => Some(i18n::t("aur_ssh.args.hint_freeform_reason")),
             ArgsShape::Many => match self {
-                AurSshCommand::SetComaintainers => Some("space-separated AUR usernames"),
-                AurSshCommand::SetKeywords => Some("space-separated keywords"),
-                _ => Some("space-separated arguments"),
+                AurSshCommand::SetComaintainers => Some(i18n::t("aur_ssh.args.hint_comaintainers")),
+                AurSshCommand::SetKeywords => Some(i18n::t("aur_ssh.args.hint_keywords")),
+                _ => Some(i18n::t("aur_ssh.args.hint_many_generic")),
             },
         }
     }

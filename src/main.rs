@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod i18n;
 mod runtime;
 mod state;
 mod ui;
@@ -28,6 +29,8 @@ fn ensure_standard_path_for_subprocesses() {
 
 fn main() -> glib::ExitCode {
     ensure_standard_path_for_subprocesses();
+    let cfg = config::Config::load();
+    i18n::init(&cfg);
     let _ = adw::init();
     runtime::init();
 

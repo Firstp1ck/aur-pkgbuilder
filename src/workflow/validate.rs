@@ -78,30 +78,6 @@ impl CheckId {
         }
     }
 
-    pub fn description(self) -> &'static str {
-        match self {
-            CheckId::BashSyntax => {
-                "Parse the PKGBUILD with `bash -n` — catches typos before makepkg."
-            }
-            CheckId::PrintSrcinfo => {
-                "`makepkg --printsrcinfo` — PKGBUILD must expose the expected fields."
-            }
-            CheckId::VerifySource => {
-                "`makepkg --verifysource` — downloads and checksums every source entry."
-            }
-            CheckId::ShellCheck => {
-                "Static analysis for PKGBUILD with makepkg-oriented shellcheck excludes (optional — install `shellcheck`)."
-            }
-            CheckId::Namcap => "Arch packaging lint of the PKGBUILD (optional — install `namcap`).",
-            CheckId::FakerootBuild => {
-                "`makepkg -f --noconfirm` — full build using fakeroot for the package() step. Slow."
-            }
-            CheckId::NamcapPackage => {
-                "`namcap -i <pkg>.pkg.tar.*` on the artefact produced by the fakeroot build."
-            }
-        }
-    }
-
     pub fn tier(self) -> CheckTier {
         match self {
             CheckId::BashSyntax | CheckId::PrintSrcinfo | CheckId::VerifySource => {

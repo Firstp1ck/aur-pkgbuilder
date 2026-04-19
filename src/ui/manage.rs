@@ -14,6 +14,7 @@ use gtk4::{
     PolicyType, Popover, ScrolledWindow, TextView, WrapMode,
 };
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -34,16 +35,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("Administer AUR packages")
+        .label(i18n::t("manage.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Import existing AUR repositories and check for upstream updates. “Register new \
-             AUR package” lives on the Home tab. Lifecycle actions tagged “preview” are stubbed \
-             and will land in a future release.",
-        )
+        .label(i18n::t("manage.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -52,12 +49,97 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&heading);
     content.append(&sub);
 
+    content.append(&language_group(shell, state, &toasts));
     content.append(&global_actions_group(shell, state, &toasts));
     content.append(&ssh_commands_group(shell, state));
     content.append(&packages_group(shell, state, &toasts));
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("Manage packages", &toasts)
+    ui::home::wrap_page(&i18n::t("manage.page_title"), &toasts)
+}
+
+fn sync_lang_buttons(en: &Button, de: &Button) {
+    en.remove_css_class("suggested-action");
+    de.remove_css_class("suggested-action");
+    match i18n::active_locale() {
+        i18n::UiLocale::EnUs => en.add_css_class("suggested-action"),
+        i18n::UiLocale::DeDe => de.add_css_class("suggested-action"),
+    }
+}
+
+fn language_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
+    let row = ActionRow::builder()
+        .title(i18n::t("manage.language_row_title"))
+        .subtitle(i18n::t("manage.language_row_sub"))
+        .build();
+    let en = Button::builder()
+        .label(i18n::t("manage.lang_label_en"))
+        .valign(Align::Center)
+        .css_classes(["pill"])
+        .build();
+    let de = Button::builder()
+        .label(i18n::t("manage.lang_label_de"))
+        .valign(Align::Center)
+        .css_classes(["pill"])
+        .build();
+    let btn_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .valign(Align::Center)
+        .build();
+    btn_box.append(&en);
+    btn_box.append(&de);
+    row.add_suffix(&btn_box);
+    sync_lang_buttons(&en, &de);
+
+    let shell_en = shell.clone();
+    let state_en = state.clone();
+    let toasts_en = toasts.clone();
+    let de_for_en = de.clone();
+    en.connect_clicked(move |btn| {
+        i18n::set_active_locale(i18n::UiLocale::EnUs);
+        {
+            let mut st = state_en.borrow_mut();
+            st.config.locale = Some(i18n::locale_storage_tag(i18n::UiLocale::EnUs).to_string());
+            let _ = st.config.save();
+        }
+        shell_en.refresh_shell_locale(&state_en);
+        if let Some(win) = btn.root().and_downcast::<gtk4::Window>() {
+            let t = i18n::t("app.window_title");
+            win.set_title(Some(t.as_str()));
+        }
+        sync_lang_buttons(btn, &de_for_en);
+        toasts_en.add_toast(Toast::new(&i18n::t("manage.lang_toast_en")));
+    });
+
+    let shell_de = shell.clone();
+    let state_de = state.clone();
+    let toasts_de = toasts.clone();
+    let en_for_de = en.clone();
+    de.connect_clicked(move |btn| {
+        i18n::set_active_locale(i18n::UiLocale::DeDe);
+        {
+            let mut st = state_de.borrow_mut();
+            st.config.locale = Some(i18n::locale_storage_tag(i18n::UiLocale::DeDe).to_string());
+            let _ = st.config.save();
+        }
+        shell_de.refresh_shell_locale(&state_de);
+        if let Some(win) = btn.root().and_downcast::<gtk4::Window>() {
+            let t = i18n::t("app.window_title");
+            win.set_title(Some(t.as_str()));
+        }
+        sync_lang_buttons(&en_for_de, btn);
+        toasts_de.add_toast(Toast::new(&i18n::t("manage.lang_toast_de")));
+    });
+
+    ui::collapsible_preferences_section(
+        i18n::t("manage.language_section"),
+        Some(i18n::t("manage.language_section_desc").as_str()),
+        ui::DEFAULT_SECTION_EXPANDED,
+        |exp| {
+            exp.add_row(&row);
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +148,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
 fn global_actions_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ListBox {
     ui::collapsible_preferences_section(
-        "Lifecycle",
-        Some("Operations that affect an AUR repository as a whole."),
+        i18n::t("manage.lifecycle"),
+        Some(&i18n::t("manage.lifecycle_desc")),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&import_row(shell, state, toasts));
@@ -78,10 +160,11 @@ fn global_actions_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOv
 
 fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> ListBox {
     let row = ActionRow::builder()
-        .title("Open SSH commands")
-        .subtitle("Uses the SSH key configured on the connection screen.")
+        .title(i18n::t("manage.open_ssh_commands"))
+        .subtitle(i18n::t("manage.open_ssh_commands_sub"))
         .build();
-    let btn = primary_button("Open");
+    let open_lbl = i18n::t("manage.open");
+    let btn = primary_button(&open_lbl);
     row.add_suffix(&btn);
 
     let nav = shell.nav();
@@ -91,11 +174,8 @@ fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> ListBox {
         nav.push(&page);
     });
     ui::collapsible_preferences_section(
-        "AUR SSH commands",
-        Some(
-            "Curated picker for the commands aur@aur.archlinux.org accepts — vote, \
-             flag, adopt, disown, list-repos, and friends.",
-        ),
+        i18n::t("manage.aur_ssh_section"),
+        Some(&i18n::t("manage.aur_ssh_section_desc")),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&row);
@@ -105,24 +185,26 @@ fn ssh_commands_group(shell: &MainShell, state: &AppStateRef) -> ListBox {
 
 fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
     let row = ActionRow::builder()
-        .title("Import from existing AUR repo")
-        .subtitle("Clone an AUR package by name and pre-fill its registry entry.")
+        .title(i18n::t("manage.import_row_title"))
+        .subtitle(i18n::t("manage.import_row_sub"))
         .build();
     row.add_suffix(&preview_badge());
-    let btn = primary_button("Import…");
+    let import_lbl = i18n::t("manage.import_dots");
+    let btn = primary_button(&import_lbl);
     row.add_suffix(&btn);
 
     let shell = shell.clone();
     let state = state.clone();
     let toasts = toasts.clone();
+    let import_title = i18n::t("manage.prompt_import_title");
     btn.connect_clicked(move |btn| {
         let window = btn.root().and_downcast::<gtk4::Window>();
         let state = state.clone();
         let toasts = toasts.clone();
         let shell = shell.clone();
-        prompt_pkg_name(window.as_ref(), "Import AUR package", move |aur_id| {
+        prompt_pkg_name(window.as_ref(), &import_title, move |aur_id| {
             let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("Set a working directory first."));
+                toasts.add_toast(Toast::new(&i18n::t("manage.workdir_required_toast")));
                 return;
             };
             let toasts = toasts.clone();
@@ -136,12 +218,18 @@ fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> 
                         state.borrow_mut().registry.upsert(pkg);
                         let _ = state.borrow().registry.save();
                         shell.refresh_tab_headers_from_state(&state);
-                        toasts.add_toast(Toast::new(&format!("Imported {id}")));
+                        toasts.add_toast(Toast::new(&i18n::tf("manage.imported", &[("id", &id)])));
                     }
                     Err(AdminError::NotImplemented(what)) => {
-                        toasts.add_toast(Toast::new(&format!("Coming soon: {what}")));
+                        toasts.add_toast(Toast::new(&i18n::tf(
+                            "manage.coming_soon",
+                            &[("what", what)],
+                        )));
                     }
-                    Err(e) => toasts.add_toast(Toast::new(&format!("Failed: {e}"))),
+                    Err(e) => toasts.add_toast(Toast::new(&i18n::tf(
+                        "manage.failed",
+                        &[("e", &e.to_string())],
+                    ))),
                 },
             );
         });
@@ -151,14 +239,11 @@ fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> 
 
 fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> ActionRow {
     let row = ActionRow::builder()
-        .title("Check all packages for upstream updates")
-        .subtitle(
-            "Fetches each registry PKGBUILD URL and compares it to the PKGBUILD already on disk \
-             under your work directory (or per-package destination). Clearing config does not \
-             delete those files — if you want a clean tree, use Sync or remove the old folders.",
-        )
+        .title(i18n::t("manage.check_all_title"))
+        .subtitle(i18n::t("manage.check_all_sub"))
         .build();
-    let btn = primary_button("Check all");
+    let check_lbl = i18n::t("manage.check_all");
+    let btn = primary_button(&check_lbl);
     row.add_suffix(&btn);
 
     let shell = shell.clone();
@@ -166,12 +251,12 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
     let toasts = toasts.clone();
     btn.connect_clicked(move |btn| {
         let Some(work) = state.borrow().config.work_dir.clone() else {
-            toasts.add_toast(Toast::new("Set a working directory first."));
+            toasts.add_toast(Toast::new(&i18n::t("manage.workdir_required_toast")));
             return;
         };
         let packages = state.borrow().registry.packages.clone();
         if packages.is_empty() {
-            toasts.add_toast(Toast::new("No packages in the registry."));
+            toasts.add_toast(Toast::new(&i18n::t("manage.no_packages_registry")));
             return;
         }
         let toasts_outer = toasts.clone();
@@ -194,9 +279,9 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
                     .iter()
                     .all(|(_, r)| matches!(r, Ok(UpdateStatus::UpToDate { .. })));
                 if all_match {
-                    toasts_outer.add_toast(Toast::new(&format!(
-                        "All {n} package(s): on-disk PKGBUILD matches upstream (under your work directory). \
-                         Deleting config alone does not remove those files — reuse Sync or a fresh work dir if you expected empty trees."
+                    toasts_outer.add_toast(Toast::new(&i18n::tf(
+                        "manage.all_match_toast",
+                        &[("n", &n.to_string())],
                     )));
                     return;
                 }
@@ -205,9 +290,9 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
                     .iter()
                     .any(|(_, r)| matches!(r, Ok(UpdateStatus::Outdated { .. })))
                 {
-                    "Upstream check — review diffs"
+                    i18n::t("manage.upstream_title_diff")
                 } else {
-                    "Upstream check — report"
+                    i18n::t("manage.upstream_title_report")
                 };
                 let bulk = packages_missing_pkgbuild_for_bulk_sync(&results).map(|packages| {
                     UpstreamReportBulkSync {
@@ -218,10 +303,8 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
                         shell: shell_spawn.clone(),
                     }
                 });
-                present_monospace_report_window(window.as_ref(), title, &report, bulk.as_ref());
-                toasts_outer.add_toast(Toast::new(
-                    "One or more packages differ from upstream or failed — see the report window.",
-                ));
+                present_monospace_report_window(window.as_ref(), &title, &report, bulk.as_ref());
+                toasts_outer.add_toast(Toast::new(&i18n::t("manage.upstream_toast")));
             },
         );
     });
@@ -236,12 +319,12 @@ fn packages_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay)
     let packages = state.borrow().registry.packages.clone();
     if packages.is_empty() {
         let empty = ActionRow::builder()
-            .title("No packages in the registry")
-            .subtitle("Use the home screen's “Add package…” to register one.")
+            .title(i18n::t("manage.empty_registry_title"))
+            .subtitle(i18n::t("manage.empty_registry_sub"))
             .build();
         return ui::collapsible_preferences_section(
-            "Packages",
-            Some("Per-package admin actions."),
+            i18n::t("manage.packages_section"),
+            Some(i18n::t("manage.packages_section_desc").as_str()),
             ui::DEFAULT_SECTION_EXPANDED,
             |exp| {
                 exp.add_row(&empty);
@@ -250,8 +333,8 @@ fn packages_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay)
     }
 
     let (list, exp) = ui::collapsible_preferences_section_with_expander(
-        "Packages",
-        Some("Per-package admin actions."),
+        i18n::t("manage.packages_section"),
+        Some(i18n::t("manage.packages_section_desc").as_str()),
         ui::DEFAULT_SECTION_EXPANDED,
     );
     for pkg in packages {
@@ -290,10 +373,10 @@ fn build_row_menu(
         .css_classes(vec!["menu"])
         .build();
 
-    let open_wizard = menu_button("Open build wizard");
-    let open_dir = menu_button("Open working directory");
-    let check = menu_button("Check upstream PKGBUILD");
-    let archive = menu_button("Archive / disown (preview)");
+    let open_wizard = menu_button(&i18n::t("manage.menu.open_wizard"));
+    let open_dir = menu_button(&i18n::t("manage.menu.open_dir"));
+    let check = menu_button(&i18n::t("manage.menu.check_upstream"));
+    let archive = menu_button(&i18n::t("manage.menu.archive_preview"));
 
     popover_content.append(&open_wizard);
     popover_content.append(&open_dir);
@@ -337,7 +420,9 @@ fn build_row_menu(
             let pkg = pkg.clone();
             runtime::spawn(
                 async move { admin::open_work_dir(work.as_deref(), &pkg).await },
-                move |res| render_admin_result(&toasts, res.map(|_| ()), "Opened"),
+                move |res| {
+                    render_admin_result(&toasts, res.map(|_| ()), &i18n::t("manage.ok_opened"))
+                },
             );
         });
     }
@@ -351,7 +436,7 @@ fn build_row_menu(
         check.connect_clicked(move |_| {
             popover.popdown();
             let Some(work) = state.borrow().config.work_dir.clone() else {
-                toasts.add_toast(Toast::new("Set a working directory first."));
+                toasts.add_toast(Toast::new(&i18n::t("manage.workdir_required_toast")));
                 return;
             };
             let toasts = toasts.clone();
@@ -362,8 +447,9 @@ fn build_row_menu(
                 async move { admin::check_upstream(&work, &pkg).await },
                 move |res| match res {
                     Ok(UpdateStatus::UpToDate { version }) => {
-                        toasts.add_toast(Toast::new(&format!(
-                            "{pkg_id}: on-disk PKGBUILD matches upstream (pkgver {version})."
+                        toasts.add_toast(Toast::new(&i18n::tf(
+                            "manage.upstream_ok_toast",
+                            &[("pkg", &pkg_id), ("version", version.as_str())],
                         )));
                     }
                     Ok(UpdateStatus::Outdated {
@@ -371,20 +457,28 @@ fn build_row_menu(
                         upstream,
                         diff,
                     }) => {
-                        let body = format!(
-                            "pkgver: {local} (local) → {upstream} (upstream)\n\nDiff (same style as Publish “Diff vs HEAD”):\n\n{diff}"
+                        let body = i18n::tf(
+                            "manage.upstream_diff_body",
+                            &[
+                                ("local", local.as_str()),
+                                ("upstream", upstream.as_str()),
+                                ("diff", diff.as_str()),
+                            ],
                         );
-                        present_monospace_report_window(
-                            window.as_ref(),
-                            &format!("{pkg_id} — PKGBUILD vs upstream"),
-                            &body,
-                            None,
-                        );
+                        let win_title =
+                            i18n::tf("manage.upstream_window_title", &[("pkg", &pkg_id)]);
+                        present_monospace_report_window(window.as_ref(), &win_title, &body, None);
                     }
                     Err(AdminError::NotImplemented(what)) => {
-                        toasts.add_toast(Toast::new(&format!("Coming soon: {what}")));
+                        toasts.add_toast(Toast::new(&i18n::tf(
+                            "manage.coming_soon",
+                            &[("what", what)],
+                        )));
                     }
-                    Err(e) => toasts.add_toast(Toast::new(&format!("{pkg_id}: {e}"))),
+                    Err(e) => toasts.add_toast(Toast::new(&i18n::tf(
+                        "manage.pkg_err_toast",
+                        &[("pkg", &pkg_id), ("err", &e.to_string())],
+                    ))),
                 },
             );
         });
@@ -400,7 +494,7 @@ fn build_row_menu(
             let toasts = toasts.clone();
             let pkg_id = pkg_id.clone();
             runtime::spawn(async move { admin::archive(&pkg_id).await }, move |res| {
-                render_admin_result(&toasts, res, "Archived")
+                render_admin_result(&toasts, res, &i18n::t("manage.ok_archived"))
             });
         });
     }
@@ -455,16 +549,17 @@ fn present_monospace_report_window(
     if let Some(ctx) = bulk_sync {
         let n = ctx.packages.len();
         let sync_btn = Button::builder()
-            .label(format!("Download {n} missing PKGBUILD(s)"))
-            .tooltip_text(
-                "Same as Sync: fetch each package’s PKGBUILD URL into its working directory.",
-            )
+            .label(i18n::tf(
+                "manage.bulk_download_btn",
+                &[("n", &n.to_string())],
+            ))
+            .tooltip_text(i18n::t("manage.bulk_download_tooltip"))
             .css_classes(vec!["suggested-action"])
             .build();
         wire_bulk_sync_button(&sync_btn, ctx.clone());
         header.pack_start(&sync_btn);
     }
-    let close = Button::builder().label("Close").build();
+    let close = Button::builder().label(i18n::t("manage.close")).build();
     header.pack_end(&close);
 
     let buffer = gtk4::TextBuffer::new(None);
@@ -514,10 +609,7 @@ async fn download_pkgbuilds_bulk(
     for pkg in packages {
         let url = pkg.pkgbuild_url.trim();
         if url.is_empty() {
-            failed.push((
-                pkg.id.clone(),
-                "No PKGBUILD URL — add one under Edit package.".into(),
-            ));
+            failed.push((pkg.id.clone(), i18n::t("manage.no_pkgbuild_url")));
             continue;
         }
         match sync::download_pkgbuild(Some(work), pkg, url).await {
@@ -553,12 +645,14 @@ fn apply_bulk_pkgbuild_sync_outcome(
     let n_fail = failed.len();
     let toast = match (n_ok, n_fail) {
         (0, 0) => return,
-        (_, 0) => format!("Downloaded PKGBUILD for {n_ok} package(s)."),
-        (0, _) => format!(
-            "Could not download PKGBUILD for {n_fail} package(s). Use Sync per package for details."
+        (_, 0) => i18n::tf("manage.bulk_download_ok", &[("n_ok", &n_ok.to_string())]),
+        (0, _) => i18n::tf(
+            "manage.bulk_download_fail",
+            &[("n_fail", &n_fail.to_string())],
         ),
-        _ => format!(
-            "Downloaded {n_ok} PKGBUILD(s); {n_fail} failed — use Sync or Edit package for failing rows."
+        _ => i18n::tf(
+            "manage.bulk_download_partial",
+            &[("n_ok", &n_ok.to_string()), ("n_fail", &n_fail.to_string())],
         ),
     };
     toasts.add_toast(Toast::new(&toast));
@@ -622,7 +716,9 @@ fn bulk_upstream_package_column_width(
     results
         .iter()
         .map(|(pkg, _)| pkg.id.len())
-        .chain(std::iter::once("Package".len()))
+        .chain(std::iter::once(
+            i18n::t("manage.bulk_report_col_package").len(),
+        ))
         .max()
         .unwrap_or(0)
         .clamp(BULK_UPSTREAM_PKG_COL_MIN, BULK_UPSTREAM_PKG_COL_MAX)
@@ -639,29 +735,43 @@ fn bulk_upstream_package_column_width(
 ///
 /// Details:
 /// - Uses fixed-width columns in a monospace window so `Status` and `Details` scan quickly.
+fn bulk_upstream_status_col_width() -> usize {
+    [
+        i18n::t("manage.bulk_report_status_up_to_date"),
+        i18n::t("manage.bulk_report_status_outdated"),
+        i18n::t("manage.bulk_report_status_preview"),
+        i18n::t("manage.bulk_report_status_error"),
+    ]
+    .iter()
+    .map(String::len)
+    .max()
+    .unwrap_or(10)
+    .clamp(10, 32)
+}
+
 fn format_bulk_upstream_report(
     results: &[(PackageDef, Result<UpdateStatus, AdminError>)],
 ) -> String {
     let pkg_w = bulk_upstream_package_column_width(results);
-    const STAT_W: usize = 10;
+    let stat_w = bulk_upstream_status_col_width();
     const DETAIL_RULE_LEN: usize = 52;
 
     let mut lines: Vec<String> = Vec::with_capacity(results.len().saturating_add(4));
     lines.push(format!(
-        "{:<pkg_w$} | {:<STAT_W$} | {}",
-        "Package",
-        "Status",
-        "Details",
+        "{:<pkg_w$} | {:<stat_w$} | {}",
+        i18n::t("manage.bulk_report_col_package"),
+        i18n::t("manage.bulk_report_col_status"),
+        i18n::t("manage.bulk_report_col_details"),
         pkg_w = pkg_w,
-        STAT_W = STAT_W
+        stat_w = stat_w
     ));
     lines.push(format!(
-        "{:-<pkg_w$}-+-{:-<STAT_W$}-+-{}",
+        "{:-<pkg_w$}-+-{:-<stat_w$}-+-{}",
         "",
         "",
         "-".repeat(DETAIL_RULE_LEN),
         pkg_w = pkg_w,
-        STAT_W = STAT_W
+        stat_w = stat_w
     ));
 
     for (pkg, res) in results {
@@ -669,11 +779,15 @@ fn format_bulk_upstream_report(
         match res {
             Ok(UpdateStatus::UpToDate { version }) => {
                 lines.push(format!(
-                    "{:<pkg_w$} | {:<STAT_W$} | pkgver {version}",
+                    "{:<pkg_w$} | {:<stat_w$} | {}",
                     id,
-                    "up to date",
+                    i18n::t("manage.bulk_report_status_up_to_date"),
+                    i18n::tf(
+                        "manage.bulk_report_pkgver",
+                        &[("version", version.as_str())]
+                    ),
                     pkg_w = pkg_w,
-                    STAT_W = STAT_W
+                    stat_w = stat_w
                 ));
             }
             Ok(UpdateStatus::Outdated {
@@ -682,32 +796,39 @@ fn format_bulk_upstream_report(
                 diff,
             }) => {
                 lines.push(format!(
-                    "{:<pkg_w$} | {:<STAT_W$} | pkgver: {local} (local) → {upstream} (upstream)",
+                    "{:<pkg_w$} | {:<stat_w$} | {}",
                     id,
-                    "outdated",
+                    i18n::t("manage.bulk_report_status_outdated"),
+                    i18n::tf(
+                        "manage.bulk_report_pkgver_cmp",
+                        &[("local", local.as_str()), ("upstream", upstream.as_str()),],
+                    ),
                     pkg_w = pkg_w,
-                    STAT_W = STAT_W
+                    stat_w = stat_w
                 ));
-                lines.push(format!("=== {id} (PKGBUILD vs upstream) ===\n\n{diff}"));
+                lines.push(i18n::tf(
+                    "manage.bulk_report_diff_heading",
+                    &[("id", id), ("diff", diff.as_str())],
+                ));
             }
             Err(AdminError::NotImplemented(what)) => {
                 lines.push(format!(
-                    "{:<pkg_w$} | {:<STAT_W$} | {what}",
+                    "{:<pkg_w$} | {:<stat_w$} | {what}",
                     id,
-                    "preview",
+                    i18n::t("manage.bulk_report_status_preview"),
                     pkg_w = pkg_w,
-                    STAT_W = STAT_W
+                    stat_w = stat_w
                 ));
             }
             Err(e) => {
                 let detail = e.to_string().replace('\n', " ");
                 lines.push(format!(
-                    "{:<pkg_w$} | {:<STAT_W$} | {}",
+                    "{:<pkg_w$} | {:<stat_w$} | {}",
                     id,
-                    "error",
+                    i18n::t("manage.bulk_report_status_error"),
                     detail,
                     pkg_w = pkg_w,
-                    STAT_W = STAT_W
+                    stat_w = stat_w
                 ));
             }
         }
@@ -720,9 +841,15 @@ fn render_admin_result(toasts: &ToastOverlay, res: Result<(), AdminError>, ok_ms
     match res {
         Ok(()) => toasts.add_toast(Toast::new(ok_msg)),
         Err(AdminError::NotImplemented(what)) => {
-            toasts.add_toast(Toast::new(&format!("Coming soon: {what}")));
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "manage.coming_soon",
+                &[("what", what)],
+            )));
         }
-        Err(e) => toasts.add_toast(Toast::new(&format!("Failed: {e}"))),
+        Err(e) => toasts.add_toast(Toast::new(&i18n::tf(
+            "manage.failed",
+            &[("e", &e.to_string())],
+        ))),
     }
 }
 
@@ -744,7 +871,7 @@ fn menu_button(label: &str) -> Button {
 
 fn preview_badge() -> Label {
     Label::builder()
-        .label("preview")
+        .label(i18n::t("manage.preview"))
         .valign(Align::Center)
         .css_classes(vec!["dim-label", "caption", "pill"])
         .build()
@@ -863,15 +990,19 @@ mod bulk_upstream_report_tests {
         ];
         let report = format_bulk_upstream_report(&results);
         let header = report.lines().next().expect("header line");
+        let col_pkg = crate::i18n::t("manage.bulk_report_col_package");
+        let col_stat = crate::i18n::t("manage.bulk_report_col_status");
+        let col_detail = crate::i18n::t("manage.bulk_report_col_details");
         assert!(
-            header.starts_with("Package")
-                && header.contains(" | Status")
-                && header.contains("| Details"),
+            header.starts_with(&col_pkg)
+                && header.contains(&format!(" | {col_stat}"))
+                && header.contains(&format!("| {col_detail}")),
             "header: {header}"
         );
+        let err_tag = crate::i18n::t("manage.bulk_report_status_error");
         let err_lines: Vec<&str> = report
             .lines()
-            .filter(|l| l.contains("error") && l.contains('|'))
+            .filter(|l| l.contains(&err_tag) && l.contains('|'))
             .collect();
         assert_eq!(err_lines.len(), 2, "{report}");
         let pipe0 = err_lines[0].match_indices(" | ").count();
@@ -900,8 +1031,10 @@ mod bulk_upstream_report_tests {
             }),
         )];
         let report = format_bulk_upstream_report(&results);
-        assert!(report.contains("outdated"));
-        assert!(report.contains("foo (PKGBUILD vs upstream)"));
+        let out_st = crate::i18n::t("manage.bulk_report_status_outdated");
+        assert!(report.contains(&out_st));
+        assert!(report.contains("foo"));
         assert!(report.contains("-pkgver=1"));
+        assert!(report.contains("=== foo"));
     }
 }

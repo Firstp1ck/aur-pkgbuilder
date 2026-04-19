@@ -11,7 +11,7 @@ pub fn banner_set_pkgbuild_stale(banner: &Banner, pkg: &PackageDef) {
         package::pkgbuild_refresh_clock_now(),
     ) {
         Some(msg) => {
-            banner.set_title(msg);
+            banner.set_title(&msg);
             banner.set_revealed(true);
         }
         None => {

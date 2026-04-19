@@ -14,6 +14,7 @@ use adw::prelude::*;
 use adw::{ActionRow, EntryRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Image, Label, Orientation, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -35,16 +36,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label("Sign in with your AUR username")
+        .label(i18n::t("onboarding.heading"))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(
-            "Login here is just your aur.archlinux.org username — the public AUR RPC \
-             uses it to list what you maintain. When you later push a release, your \
-             SSH key is what actually verifies you.",
-        )
+        .label(i18n::t("onboarding.subtitle"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -54,30 +51,27 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     // --- Account group ---
-    let username_row = EntryRow::builder().title("AUR username").build();
+    let username_row = EntryRow::builder()
+        .title(i18n::t("onboarding.username_title"))
+        .build();
     if let Some(existing) = state.borrow().config.aur_username.clone() {
         username_row.set_text(&existing);
     }
     let fetch_row = ActionRow::builder()
-        .title("Fetch maintained packages")
-        .subtitle("Queries the AUR for packages you own or co-maintain.")
+        .title(i18n::t("onboarding.fetch_row_title"))
+        .subtitle(i18n::t("onboarding.fetch_row_subtitle"))
         .build();
     let fetch_spinner = Spinner::new();
     let fetch_btn = Button::builder()
-        .label("Fetch")
+        .label(i18n::t("onboarding.fetch_button"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
     fetch_row.add_suffix(&fetch_spinner);
     fetch_row.add_suffix(&fetch_btn);
     content.append(&ui::collapsible_preferences_section(
-        "Login",
-        Some(
-            "No password is exchanged. Your SSH key is set up separately on the \
-             AUR connection screen — that's what authenticates pushes. Brand-new AUR accounts \
-             are sometimes held for manual anti-spam review; if login on the website fails, \
-             wait for approval before pasting SSH keys.",
-        ),
+        i18n::t("onboarding.section_login"),
+        Some(&i18n::t("onboarding.section_login_desc")),
         ui::DEFAULT_SECTION_EXPANDED,
         |exp| {
             exp.add_row(&username_row);
@@ -87,12 +81,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     // --- Results list (populated after fetch; ListBox, not PreferencesGroup, so we can clear rows safely.)
     let results_title = Label::builder()
-        .label("Your packages")
+        .label(i18n::t("onboarding.results_title"))
         .halign(Align::Start)
         .css_classes(vec!["title-4"])
         .build();
     let results_desc = Label::builder()
-        .label("Tick the packages you want to administer from here.")
+        .label(i18n::t("onboarding.results_desc"))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -102,8 +96,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&results_desc);
     let results_list = ui::boxed_list_box();
     let empty_row = ActionRow::builder()
-        .title("Nothing fetched yet")
-        .subtitle("Enter your username above and press Fetch.")
+        .title(i18n::t("onboarding.empty_row_title"))
+        .subtitle(i18n::t("onboarding.empty_row_subtitle"))
         .build();
     results_list.append(&empty_row);
     content.append(&results_list);
@@ -117,12 +111,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .halign(Align::End)
         .build();
     let skip_btn = Button::builder()
-        .label("Skip setup")
-        .tooltip_text("Skips package import and SSH setup. You can revisit both from home later.")
+        .label(i18n::t("onboarding.skip"))
+        .tooltip_text(i18n::t("onboarding.skip_tooltip"))
         .css_classes(vec!["pill"])
         .build();
     let import_btn = Button::builder()
-        .label("Import & continue to SSH")
+        .label(i18n::t("onboarding.import_continue"))
         .sensitive(false)
         .css_classes(vec!["pill", "suggested-action"])
         .build();
@@ -144,7 +138,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         fetch_btn.connect_clicked(move |_| {
             let username = username_row.text().trim().to_string();
             if username.is_empty() {
-                toasts.add_toast(Toast::new("Enter your AUR username first."));
+                toasts.add_toast(Toast::new(&i18n::t("onboarding.toast_enter_username")));
                 return;
             }
             state.borrow_mut().config.aur_username = Some(username.clone());
@@ -171,30 +165,33 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     match res {
                         Ok(packages) if packages.is_empty() => {
                             let row = ActionRow::builder()
-                                .title("No packages found")
-                                .subtitle(
-                                    "Double-check your username, or register a package on the AUR first.",
-                                )
+                                .title(i18n::t("onboarding.no_packages_row_title"))
+                                .subtitle(i18n::t("onboarding.no_packages_row_subtitle"))
                                 .build();
                             results_list.append(&row);
-                            toasts.add_toast(Toast::new("No packages found for this user"));
+                            toasts.add_toast(Toast::new(&i18n::t("onboarding.toast_no_packages")));
                         }
                         Ok(packages) => {
-                            toasts.add_toast(Toast::new(&format!(
-                                "Found {} package(s)",
-                                packages.len()
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "onboarding.toast_found_n",
+                                &[("n", &packages.len().to_string())],
                             )));
                             for pkg in packages {
-                                let row =
-                                    render_package_row(&pkg, &selections, &import_btn);
+                                let row = render_package_row(&pkg, &selections, &import_btn);
                                 results_list.append(&row);
                             }
                         }
                         Err(AurAccountError::Rpc(msg)) => {
-                            toasts.add_toast(Toast::new(&format!("AUR said: {msg}")));
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "onboarding.toast_aur_said",
+                                &[("msg", &msg)],
+                            )));
                         }
                         Err(AurAccountError::Other(err)) => {
-                            toasts.add_toast(Toast::new(&format!("Fetch failed: {err}")));
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "onboarding.toast_fetch_failed",
+                                &[("err", &err.to_string())],
+                            )));
                         }
                     }
                 },
@@ -225,7 +222,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 .map(|(pkg, _)| pkg.clone())
                 .collect();
             if picked.is_empty() {
-                toasts.add_toast(Toast::new("Select at least one package."));
+                toasts.add_toast(Toast::new(&i18n::t("onboarding.toast_select_one")));
                 return;
             }
             let count = picked.len();
@@ -236,7 +233,10 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 }
                 let _ = st.registry.save();
             }
-            toasts.add_toast(Toast::new(&format!("Imported {count} package(s)")));
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "onboarding.toast_imported_n",
+                &[("n", &count.to_string())],
+            )));
             shell.refresh_tab_headers_from_state(&state);
             let page = ui::ssh_setup::build(
                 &nav,
@@ -254,7 +254,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("Onboarding", &toasts)
+    ui::home::wrap_page(&i18n::t("onboarding.page_title"), &toasts)
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ fn render_package_row(
     let desc = pkg
         .description
         .clone()
-        .unwrap_or_else(|| "(no description)".into());
+        .unwrap_or_else(|| i18n::t("onboarding.no_description"));
     let row = ActionRow::builder()
         .title(&pkg.name)
         .subtitle(&desc)
@@ -303,7 +303,8 @@ fn render_package_row(
     if pkg.out_of_date.is_some() {
         let flag = Image::from_icon_name("dialog-warning-symbolic");
         flag.add_css_class("warning");
-        flag.set_tooltip_text(Some("Flagged out-of-date on the AUR"));
+        let ood_tip = i18n::t("onboarding.ood_tooltip");
+        flag.set_tooltip_text(Some(&ood_tip));
         row.add_suffix(&flag);
     }
 

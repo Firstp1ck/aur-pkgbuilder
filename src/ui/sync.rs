@@ -5,6 +5,7 @@ use adw::prelude::*;
 use adw::{ActionRow, NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -55,7 +56,10 @@ fn persist_destination(
             *p = updated.clone();
         }
         if let Err(e) = st.registry.save() {
-            toasts.add_toast(Toast::new(&format!("Could not save registry: {e}")));
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "sync.toast_registry_save",
+                &[("e", &e.to_string())],
+            )));
             return false;
         }
     }
@@ -81,15 +85,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label(format!("Sync PKGBUILD — {}", pkg.title))
+        .label(i18n::tf("sync.heading", &[("title", &pkg.title)]))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     let sub = Label::builder()
-        .label(format!(
-            "Download the PKGBUILD for {} from its configured source into the destination folder.",
-            pkg.id
-        ))
+        .label(i18n::tf("sync.subtitle", &[("id", &pkg.id)]))
         .halign(Align::Start)
         .wrap(true)
         .xalign(0.0)
@@ -99,26 +100,26 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&sub);
 
     let src_row = ActionRow::builder()
-        .title("Source")
+        .title(i18n::t("sync.row.source"))
         .subtitle(&pkg.pkgbuild_url)
         .build();
     let work = state.borrow().config.work_dir.clone();
 
     let dest_row = ActionRow::builder()
-        .title("Destination (PKGBUILD path)")
+        .title(i18n::t("sync.row.destination"))
         .build();
     set_destination_row(&dest_row, work.as_deref(), &pkg);
 
     let browse_btn = Button::builder()
-        .label("Browse…")
+        .label(i18n::t("sync.browse"))
         .valign(Align::Center)
         .css_classes(vec!["pill"])
         .build();
     let default_btn = Button::builder()
-        .label("Use default")
+        .label(i18n::t("sync.use_default"))
         .valign(Align::Center)
         .css_classes(vec!["flat"])
-        .tooltip_text("Clear the saved folder — use working directory + package id (or legacy relative path).")
+        .tooltip_text(i18n::t("sync.use_default_tooltip"))
         .build();
     let dest_actions = GtkBox::builder()
         .orientation(Orientation::Horizontal)
@@ -130,13 +131,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     dest_row.add_suffix(&dest_actions);
 
     let sync_section = ui::collapsible_preferences_section(
-        "Sync and Publish",
-        Some(
-            "Publish copies PKGBUILD and .SRCINFO from the destination below into the AUR Git \
-             clone, then commits when you choose. A successful push updates the public AUR \
-             immediately. On a brand-new pkgbase, the first clone may warn that the repository \
-             is empty—that is expected.",
-        ),
+        i18n::t("sync.section_publish_title"),
+        Some(i18n::t("sync.section_publish_desc").as_str()),
         false,
         |exp| {
             exp.add_row(&src_row);
@@ -150,12 +146,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     let spinner = Spinner::new();
     let download_btn = Button::builder()
-        .label("Download PKGBUILD")
+        .label(i18n::t("sync.btn_download"))
         .sensitive(false)
         .css_classes(vec!["pill", "suggested-action"])
         .build();
     let continue_btn = Button::builder()
-        .label("Continue")
+        .label(i18n::t("sync.btn_continue"))
         .sensitive(false)
         .css_classes(vec!["pill"])
         .build();
@@ -176,13 +172,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     match sync_wf::pkgbuild_url_precheck(&pkg.pkgbuild_url) {
         Err(e) => {
             source_reachable.set(Some(false));
-            status.set_text(&e.to_string());
+            let err = e.to_string();
+            status.set_text(&err);
             apply_download_button_state(state, &download_btn, source_reachable.get());
-            toasts.add_toast(Toast::new(&e.to_string()));
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "sync.toast_url_precheck_fail",
+                &[("e", &err)],
+            )));
         }
         Ok(()) => {
             spinner.start();
-            status.set_text("Checking whether PKGBUILD is available at the source…");
+            status.set_text(&i18n::t("sync.status_precheck"));
             let state_pb = state.clone();
             let status_pb = status.clone();
             let spinner_pb = spinner.clone();
@@ -201,15 +201,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     match res {
                         Ok(()) => {
                             source_cell.set(Some(true));
-                            status_pb.set_text(
-                                "PKGBUILD is available at this URL. Set a destination if needed, then download.",
-                            );
+                            status_pb.set_text(&i18n::t("sync.status_source_ok"));
                         }
                         Err(msg) => {
                             source_cell.set(Some(false));
-                            status_pb.set_text(&format!("Cannot download PKGBUILD yet: {msg}"));
-                            toasts_pb.add_toast(Toast::new(&format!(
-                                "Download PKGBUILD is disabled: {msg}"
+                            status_pb
+                                .set_text(&i18n::tf("sync.status_source_bad", &[("msg", &msg)]));
+                            toasts_pb.add_toast(Toast::new(&i18n::tf(
+                                "sync.toast_download_disabled",
+                                &[("msg", &msg)],
                             )));
                         }
                     }
@@ -227,7 +227,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let source_cell_dest = source_reachable.clone();
         browse_btn.connect_clicked(move |btn| {
             let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
-                toasts.add_toast(Toast::new("Could not open folder picker."));
+                toasts.add_toast(Toast::new(&i18n::t("sync.toast_folder_picker")));
                 return;
             };
             let work_ref = state.borrow().config.work_dir.clone();
@@ -238,23 +238,22 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let toasts = toasts.clone();
             let download_btn_pick = download_btn_dest.clone();
             let source_pick = source_cell_dest.clone();
-            folder_pick::pick_folder(&parent, "Choose destination folder", start.as_deref(), {
+            let pick_title = i18n::t("sync.choose_destination");
+            folder_pick::pick_folder(&parent, &pick_title, start.as_deref(), {
                 move |picked| {
                     let Some(path) = picked else {
                         return;
                     };
                     let path_str = path.to_string_lossy().into_owned();
                     if sync_wf::validate_destination_path_str(&path_str).is_err() {
-                        toasts.add_toast(Toast::new(
-                            "That folder path is not usable — pick an absolute path without ..",
-                        ));
+                        toasts.add_toast(Toast::new(&i18n::t("sync.toast_bad_path")));
                         return;
                     }
                     let mut updated = state.borrow().package().clone();
                     updated.destination_dir = Some(path_str);
                     updated.sync_subdir = None;
                     if persist_destination(&state, updated, &toasts, &dest_row) {
-                        toasts.add_toast(Toast::new("Destination saved"));
+                        toasts.add_toast(Toast::new(&i18n::t("sync.toast_dest_saved")));
                         apply_download_button_state(&state, &download_btn_pick, source_pick.get());
                     }
                 }
@@ -273,7 +272,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             updated.destination_dir = None;
             updated.sync_subdir = None;
             if persist_destination(&state, updated, &toasts, &dest_row) {
-                toasts.add_toast(Toast::new("Using default destination"));
+                toasts.add_toast(Toast::new(&i18n::t("sync.toast_default_dest")));
                 apply_download_button_state(&state, &download_btn_def, source_cell_def.get());
             }
         });
@@ -292,13 +291,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let work = state.borrow().config.work_dir.clone();
             let pkg = state.borrow().package().clone();
             let Some(_dir) = sync_wf::package_dir(work.as_deref(), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on Connection or browse for a destination folder.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("sync.toast_no_dir_for_download")));
                 return;
             };
             spinner.start();
-            status.set_text("downloading…");
+            status.set_text(&i18n::t("sync.status_downloading"));
             download_btn_inner.set_sensitive(false);
 
             let state2 = state.clone();
@@ -325,16 +322,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     );
                     match res {
                         Ok(path) => {
-                            status.set_text(&format!("saved to {}", path.display()));
+                            status.set_text(&i18n::tf(
+                                "sync.status_saved_to",
+                                &[("path", &path.display().to_string())],
+                            ));
                             state2.borrow_mut().pkgbuild_path = Some(path);
                             package::record_pkgbuild_refresh(&state2);
                             shell_dl.refresh_version_tab_page(&state2);
                             continue_btn.set_sensitive(true);
-                            toasts.add_toast(Toast::new("PKGBUILD downloaded"));
+                            toasts.add_toast(Toast::new(&i18n::t("sync.toast_downloaded")));
                         }
                         Err(err) => {
-                            status.set_text(&format!("error: {err}"));
-                            toasts.add_toast(Toast::new("Download failed"));
+                            status.set_text(&i18n::tf("sync.status_error", &[("err", &err)]));
+                            toasts.add_toast(Toast::new(&i18n::t("sync.toast_download_failed")));
                         }
                     }
                 },
@@ -351,5 +351,5 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     }
 
     toasts.set_child(Some(&content));
-    ui::home::wrap_page("Sync PKGBUILD", &toasts)
+    ui::home::wrap_page(&i18n::t("sync.page_title"), &toasts)
 }

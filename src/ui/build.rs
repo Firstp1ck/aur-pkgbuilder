@@ -2,6 +2,7 @@ use adw::prelude::*;
 use adw::{NavigationPage, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, CheckButton, Label, Orientation, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui;
@@ -24,14 +25,14 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .build();
 
     let heading = Label::builder()
-        .label(format!("Build — {}", pkg.title))
+        .label(i18n::tf("build.heading", &[("title", &pkg.title)]))
         .halign(Align::Start)
         .css_classes(vec!["title-2"])
         .build();
     content.append(&heading);
 
     let hint = Label::builder()
-        .label("Runs `makepkg -f` in the package directory. Never run this app as root.")
+        .label(i18n::t("build.hint"))
         .halign(Align::Start)
         .css_classes(vec!["dim-label"])
         .build();
@@ -41,16 +42,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .orientation(Orientation::Horizontal)
         .spacing(16)
         .build();
-    let nobuild = CheckButton::with_label("Prepare only (--nobuild)");
-    let clean = CheckButton::with_label("Clean build tree after success (--clean)");
+    let nobuild = CheckButton::with_label(&i18n::t("build.option_nobuild"));
+    let clean = CheckButton::with_label(&i18n::t("build.option_clean"));
     options_row.append(&nobuild);
     options_row.append(&clean);
     content.append(&options_row);
 
-    let log = LogView::new(
-        "Build log",
-        "Live stdout and stderr from makepkg appear below once you press Build.",
-    );
+    let log = LogView::new(i18n::t("build.log_title"), i18n::t("build.log_sub"));
     content.append(log.widget());
 
     let status = Label::builder().halign(Align::Start).build();
@@ -58,11 +56,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     let spinner = Spinner::new();
     let build_btn = Button::builder()
-        .label("Build")
+        .label(i18n::t("build.btn"))
         .css_classes(vec!["pill", "suggested-action"])
         .build();
     let continue_btn = Button::builder()
-        .label("Continue to publish")
+        .label(i18n::t("build.continue_publish"))
         .sensitive(false)
         .css_classes(vec!["pill"])
         .build();
@@ -91,17 +89,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         build_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-                toasts.add_toast(Toast::new(
-                    "Set a working directory on Connection or pick a destination folder on Sync.",
-                ));
+                toasts.add_toast(Toast::new(&i18n::t("validate.toast_no_workdir")));
                 return;
             };
             if crate::workflow::privilege::nix_is_root() {
-                toasts.add_toast(Toast::new("Refusing to build as root."));
+                toasts.add_toast(Toast::new(&i18n::t("build.toast_root")));
                 return;
             }
             log.clear();
-            status.set_text("building…");
+            status.set_text(&i18n::t("build.status_building"));
             spinner.start();
             build_btn_inner.set_sensitive(false);
 
@@ -134,17 +130,20 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     build_btn_done.set_sensitive(true);
                     match res {
                         Ok(status) if status.success() => {
-                            status_done.set_text("build succeeded");
+                            status_done.set_text(&i18n::t("build.status_succeeded"));
                             continue_btn_done.set_sensitive(true);
-                            toasts_done.add_toast(Toast::new("Build finished"));
+                            toasts_done.add_toast(Toast::new(&i18n::t("build.toast_done")));
                         }
                         Ok(status) => {
-                            status_done.set_text(&format!("makepkg exited {status}"));
-                            toasts_done.add_toast(Toast::new("Build failed"));
+                            status_done.set_text(&i18n::tf(
+                                "build.makepkg_exit",
+                                &[("status", &status.to_string())],
+                            ));
+                            toasts_done.add_toast(Toast::new(&i18n::t("build.toast_failed")));
                         }
                         Err(e) => {
-                            status_done.set_text(&format!("error: {e}"));
-                            toasts_done.add_toast(Toast::new("Build error"));
+                            status_done.set_text(&i18n::tf("build.error_status", &[("err", &e)]));
+                            toasts_done.add_toast(Toast::new(&i18n::t("build.toast_error")));
                         }
                     }
                 },
