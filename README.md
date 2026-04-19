@@ -145,17 +145,17 @@ An SSH key registered on [aur.archlinux.org](https://aur.archlinux.org/) is requ
 
 ## Screenshots
 
-UI captures from **v0.1.0** — same broad flow as [Usage](#usage) below. Newer builds add **Register new AUR package** and the Home search / sort / filter bar ahead of these stills.
+UI captures from **v0.1.0** — same broad flow as [Usage](#usage) below. Some chrome (for example Home search, sort, and filter) differs in newer builds. **Import from AUR account…** onboarding is only in prose there; it is not pictured in this set.
 
-### Onboarding — import from AUR account
+### Register new AUR package
 
-Pick your AUR username, select packages from the RPC list, then continue to SSH setup.
+Wizard from Home: pkgbase and folder, remote `PKGBUILD` probe, starter or edited `PKGBUILD`, then validate / prepare / initial push.
 
-![Onboarding: AUR username and package list](images/Register_AUR_part1_v0.1.0.png)
+![Register wizard — define package and main actions](images/Register_AUR_part1_v0.1.0.png)
 
-![Onboarding: package selection and import](images/Register_AUR_part2_v0.1.0.png)
+![Register wizard — PKGBUILD editing](images/Register_AUR_part2_v0.1.0.png)
 
-![Onboarding: continue to SSH setup](images/Register_AUR_part3_v0.1.0.png)
+![Register wizard — prepare clone and push to AUR](images/Register_AUR_part3_v0.1.0.png)
 
 ### Home
 
