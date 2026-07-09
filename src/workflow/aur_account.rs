@@ -37,6 +37,9 @@ pub enum AurAccountError {
 #[derive(Debug, Clone)]
 pub struct AurPackageSummary {
     pub name: String,
+    /// AUR `PackageBase` — differs from `name` for split packages. `None` when the
+    /// RPC row omitted it, in which case the pkgbase equals `name`.
+    pub package_base: Option<String>,
     pub version: String,
     pub description: Option<String>,
     pub maintainer: Option<String>,
@@ -337,6 +340,7 @@ pub async fn aur_pkgbase_exists(name: &str) -> Result<bool, AurAccountError> {
 fn into_summary(raw: RpcResult, role: Role) -> AurPackageSummary {
     AurPackageSummary {
         name: raw.name,
+        package_base: raw.package_base,
         version: raw.version,
         description: raw.description,
         maintainer: raw.maintainer,
@@ -364,6 +368,7 @@ mod tests {
     fn summary(name: &str) -> AurPackageSummary {
         AurPackageSummary {
             name: name.into(),
+            package_base: None,
             version: "1-1".into(),
             description: None,
             maintainer: None,
@@ -389,6 +394,30 @@ mod tests {
         let aur = vec![summary("foo")];
         let reg: Vec<String> = Vec::new();
         assert!(package_ids_not_under_account(&reg, &aur).is_empty());
+    }
+
+    #[test]
+    fn to_package_def_uses_package_base_for_pkgbuild_url() {
+        let mut split = summary("child");
+        split.package_base = Some("parent".into());
+        let def = to_package_def(&split);
+        assert_eq!(def.id, "child");
+        assert_eq!(def.title, "child");
+        assert!(
+            def.pkgbuild_url.ends_with("?h=parent"),
+            "split package must fetch the PKGBUILD via its pkgbase, got {}",
+            def.pkgbuild_url
+        );
+    }
+
+    #[test]
+    fn to_package_def_falls_back_to_name_without_package_base() {
+        let def = to_package_def(&summary("solo"));
+        assert!(
+            def.pkgbuild_url.ends_with("?h=solo"),
+            "plain package keeps its own name, got {}",
+            def.pkgbuild_url
+        );
     }
 
     #[test]

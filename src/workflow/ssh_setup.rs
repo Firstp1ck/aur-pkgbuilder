@@ -523,7 +523,28 @@ pub async fn ssh_add_private_key_or_start_session(
 /// otherwise generates a fresh ed25519 key.
 pub async fn ensure_aur_key(comment: &str) -> Result<(SshKey, KeyState), SshSetupError> {
     let dir = ssh_dir()?;
-    ensure_dir_with_perms(&dir, 0o700).await?;
+    ensure_aur_key_in_dir(&dir, comment).await
+}
+
+/// What: Ensure the `aur` key pair exists inside `dir` (normally `~/.ssh`).
+///
+/// Inputs:
+/// - `dir`: directory that holds (or will hold) the `aur` / `aur.pub` pair.
+/// - `comment`: `-C` comment for a freshly generated key.
+///
+/// Output:
+/// - The key description plus whether it was [`KeyState::Reused`] or
+///   [`KeyState::Generated`].
+///
+/// Details:
+/// - The private key is never overwritten (write-once invariant).
+/// - Dir-parametrized so tests can exercise the reuse branch without
+///   touching the developer's real `~/.ssh`.
+async fn ensure_aur_key_in_dir(
+    dir: &Path,
+    comment: &str,
+) -> Result<(SshKey, KeyState), SshSetupError> {
+    ensure_dir_with_perms(dir, 0o700).await?;
 
     let private_path = dir.join(AUR_KEY_NAME);
     let public_path = with_pub_extension(&private_path);
@@ -723,6 +744,18 @@ async fn host_entry_exists(host: &str) -> Result<bool, SshSetupError> {
     Ok(status.success())
 }
 
+/// What: Decide whether every fingerprint found in `known_hosts` is trusted.
+///
+/// Inputs:
+/// - `found`: `SHA256:…` tokens computed from existing `known_hosts` entries.
+/// - `trusted`: the published AUR fingerprint list.
+///
+/// Output:
+/// - `true` only when the existing entries need no refresh.
+fn all_fingerprints_trusted(found: &[String], trusted: &[String]) -> bool {
+    found.iter().all(|f| trusted.contains(f))
+}
+
 async fn ssh_keyscan(host: &str) -> Result<String, SshSetupError> {
     let output = Command::new("ssh-keyscan")
         .arg("-T")
@@ -915,17 +948,50 @@ fn render_host_block(key: &Path) -> String {
     out
 }
 
+/// What: First whitespace-delimited token of an `ssh_config` line (the keyword).
+///
+/// Details:
+/// - OpenSSH keywords are case-insensitive; callers compare with
+///   `eq_ignore_ascii_case`.
+fn ssh_config_keyword(line: &str) -> Option<&str> {
+    line.split_whitespace().next()
+}
+
+/// What: Whether a line starts a new `ssh_config` block (`Host` / `Match`).
+///
+/// Details:
+/// - Keyword comparison is case-insensitive, so `host github.com` counts.
+fn is_ssh_config_block_boundary(line: &str) -> bool {
+    matches!(
+        ssh_config_keyword(line),
+        Some(kw) if kw.eq_ignore_ascii_case("Host") || kw.eq_ignore_ascii_case("Match")
+    )
+}
+
+/// What: Whether a line is a `Host` directive whose pattern list contains `host`.
+///
+/// Details:
+/// - Both the `Host` keyword and each pattern are compared
+///   case-insensitively, so alias lines like `Host aur.archlinux.org aur`
+///   match the target too.
+fn is_target_host_line(line: &str, host: &str) -> bool {
+    let mut tokens = line.split_whitespace();
+    let Some(kw) = tokens.next() else {
+        return false;
+    };
+    kw.eq_ignore_ascii_case("Host") && tokens.any(|pattern| pattern.eq_ignore_ascii_case(host))
+}
+
 /// Returns the updated file contents and whether anything changed.
 ///
 /// Policy:
-/// - Find a top-level `Host aur.archlinux.org` line (exact match, possibly
-///   shared with other patterns? We keep it strict: the line must be
-///   exactly `Host aur.archlinux.org`, with optional leading whitespace).
-/// - Replace from that line up to (but not including) the next `Host ` /
-///   `Match ` directive at column 0, or EOF.
+/// - Find a `Host` line whose pattern list contains `host`
+///   (case-insensitive keyword and pattern comparison; alias lines like
+///   `Host aur.archlinux.org aur` match).
+/// - Replace from that line up to (but not including) the next `Host` /
+///   `Match` directive, or EOF.
 /// - If not found, append the block with a leading blank line separator.
 fn upsert_host_block(existing: &str, host: &str, block: &str) -> (String, ConfigState) {
-    let target = format!("Host {host}");
     let mut out = String::new();
     let mut replaced = false;
     let mut skip = false;
@@ -933,7 +999,7 @@ fn upsert_host_block(existing: &str, host: &str, block: &str) -> (String, Config
 
     for line in existing.lines() {
         let trimmed = line.trim();
-        let is_host_line = trimmed.starts_with("Host ") || trimmed.starts_with("Match ");
+        let is_host_line = is_ssh_config_block_boundary(trimmed);
 
         if skip {
             if is_host_line {
@@ -944,7 +1010,7 @@ fn upsert_host_block(existing: &str, host: &str, block: &str) -> (String, Config
             }
         }
 
-        if trimmed == target && !replaced {
+        if is_target_host_line(trimmed, host) && !replaced {
             out.push_str(block);
             replaced = true;
             skip = true;
@@ -1039,6 +1105,148 @@ Host github.com
         assert!(out.contains("~/.ssh/aur"));
         assert!(!out.contains("~/.ssh/old"));
         assert!(out.contains("Host github.com"));
+    }
+
+    #[test]
+    fn upsert_replaces_lowercase_aur_block_without_duplicating() {
+        let existing = "\
+host aur.archlinux.org
+    User aur
+    IdentityFile ~/.ssh/old
+";
+        let block = "Host aur.archlinux.org\n    User aur\n    IdentityFile ~/.ssh/aur\n    IdentitiesOnly yes\n";
+        let (out, state) = upsert_host_block(existing, "aur.archlinux.org", block);
+        assert_eq!(state, ConfigState::Updated);
+        assert!(!out.contains("~/.ssh/old"), "old block must be replaced");
+        assert_eq!(
+            out.matches("aur.archlinux.org").count(),
+            1,
+            "AUR host must appear exactly once, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn upsert_keeps_lowercase_following_block() {
+        let existing = "\
+Host aur.archlinux.org
+    User aur
+    IdentityFile ~/.ssh/old
+host github.com
+    User git
+";
+        let block = "Host aur.archlinux.org\n    User aur\n    IdentityFile ~/.ssh/aur\n    IdentitiesOnly yes\n";
+        let (out, state) = upsert_host_block(existing, "aur.archlinux.org", block);
+        assert_eq!(state, ConfigState::Updated);
+        assert!(!out.contains("~/.ssh/old"));
+        assert!(
+            out.contains("host github.com"),
+            "lowercase github block must survive, got:\n{out}"
+        );
+        assert!(out.contains("User git"));
+    }
+
+    #[test]
+    fn upsert_matches_alias_host_line() {
+        let existing = "\
+Host aur.archlinux.org aur
+    User aur
+    IdentityFile ~/.ssh/old
+Host github.com
+    User git
+";
+        let block = "Host aur.archlinux.org\n    User aur\n    IdentityFile ~/.ssh/aur\n    IdentitiesOnly yes\n";
+        let (out, state) = upsert_host_block(existing, "aur.archlinux.org", block);
+        assert_eq!(state, ConfigState::Updated);
+        assert!(
+            !out.contains("~/.ssh/old"),
+            "alias block must be treated as the target, got:\n{out}"
+        );
+        assert!(out.contains("Host github.com"));
+    }
+
+    #[test]
+    fn all_fingerprints_trusted_checks_membership_and_rejects_empty() {
+        let trusted = vec![
+            "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4".to_string(),
+            "SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI".to_string(),
+        ];
+        let all_known = vec![trusted[0].clone(), trusted[1].clone()];
+        assert!(all_fingerprints_trusted(&all_known, &trusted));
+
+        let with_rogue = vec![trusted[0].clone(), "SHA256:rogueROGUErogue".to_string()];
+        assert!(!all_fingerprints_trusted(&with_rogue, &trusted));
+
+        // Nothing fingerprintable found: cannot verify, so must not be trusted.
+        assert!(!all_fingerprints_trusted(&[], &trusted));
+    }
+
+    fn workspace_test_dir(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(name)
+    }
+
+    fn generate_test_key(dir: &Path) -> (PathBuf, PathBuf) {
+        std::fs::create_dir_all(dir).expect("mkdir test dir");
+        let private = dir.join(AUR_KEY_NAME);
+        let public = with_pub_extension(&private);
+        let status = std::process::Command::new("ssh-keygen")
+            .arg("-t")
+            .arg("ed25519")
+            .arg("-N")
+            .arg("")
+            .arg("-C")
+            .arg("test@aur-pkgbuilder")
+            .arg("-f")
+            .arg(&private)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("running ssh-keygen");
+        assert!(status.success(), "test key generation failed");
+        (private, public)
+    }
+
+    #[tokio::test]
+    async fn ensure_aur_key_regenerates_missing_pub() {
+        let dir = workspace_test_dir("ssh_setup_test_regen_pub");
+        let _ = std::fs::remove_dir_all(&dir);
+        let (private, public) = generate_test_key(&dir);
+        std::fs::remove_file(&public).expect("removing .pub");
+
+        let (key, state) = ensure_aur_key_in_dir(&dir, "test@aur-pkgbuilder")
+            .await
+            .expect("ensure_aur_key_in_dir");
+        assert_eq!(state, KeyState::Reused);
+        assert!(
+            public.is_file(),
+            "missing .pub must be regenerated from the private key"
+        );
+        assert!(
+            key.fingerprint_sha256.is_some(),
+            "regenerated .pub must fingerprint"
+        );
+        // Write-once invariant: the private key is untouched.
+        assert!(private.is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn ensure_aur_key_never_rewrites_existing_pub() {
+        let dir = workspace_test_dir("ssh_setup_test_keep_pub");
+        let _ = std::fs::remove_dir_all(&dir);
+        let (_private, public) = generate_test_key(&dir);
+        let sentinel = "ssh-ed25519 AAAAsentinel sentinel@comment\n";
+        std::fs::write(&public, sentinel).expect("writing sentinel .pub");
+
+        let (_key, state) = ensure_aur_key_in_dir(&dir, "test@aur-pkgbuilder")
+            .await
+            .expect("ensure_aur_key_in_dir");
+        assert_eq!(state, KeyState::Reused);
+        let after = std::fs::read_to_string(&public).expect("reading .pub");
+        assert_eq!(after, sentinel, "existing .pub must never be rewritten");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

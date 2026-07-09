@@ -576,6 +576,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_quick_fields_lone_quote_scalar_does_not_panic() {
+        let _ = parse_quick_fields("pkgdesc=\"\n");
+    }
+
+    #[test]
+    fn parse_quick_fields_lone_quote_array_does_not_panic() {
+        let _ = parse_quick_fields("depends=('\n");
+    }
+
+    #[test]
+    fn strip_outer_quotes_lone_quote_is_identity() {
+        assert_eq!(strip_outer_quotes("\""), "\"");
+        assert_eq!(strip_outer_quotes("'"), "'");
+    }
+
+    #[test]
     fn parse_depends_array() {
         let src = "depends=('glibc' 'shadow')\n";
         let p = parse_quick_fields(src);

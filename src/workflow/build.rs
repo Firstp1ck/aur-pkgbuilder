@@ -131,6 +131,21 @@ pub async fn run_updpkgsums(
     })
 }
 
+/// Temporary stub delegating to the legacy per-key comparison (to be replaced).
+fn pkgbuild_equivalent_ignoring_whitespace(before: &str, after: &str) -> bool {
+    checksum_arrays_equivalent(before, after)
+}
+
+/// Temporary stub (to be replaced).
+fn missing_tool_install_hint(_program: &str) -> Option<&'static str> {
+    None
+}
+
+/// Temporary stub (to be replaced).
+fn spawn_error_context(_program: &str) -> String {
+    "spawning child process".into()
+}
+
 const CHECKSUM_KEYS: &[&str] = &["sha256sums", "sha512sums", "md5sums", "b2sums"];
 
 /// Strips all ASCII whitespace so `'SKIP'` and `"SKIP"` compare equal.
@@ -322,5 +337,54 @@ mod updpkgsums_tests {
         let s = "x=( 'a' (sub) 'b')";
         let open = s.find('(').unwrap();
         assert_eq!(slice_balanced_parens(s, open), Some("( 'a' (sub) 'b')"));
+    }
+
+    #[test]
+    fn gate_detects_arch_specific_checksum_change() {
+        let before = "sha256sums=('SKIP')\nsha256sums_x86_64=('aaa')\n";
+        let after = "sha256sums=('SKIP')\nsha256sums_x86_64=('bbb')\n";
+        assert!(!pkgbuild_equivalent_ignoring_whitespace(before, after));
+    }
+
+    #[test]
+    fn gate_detects_multiline_checksum_change() {
+        let before = "b2sums=('xx')\nsha256sums=(\n    'aa'\n)\n";
+        let after = "b2sums=('xx')\nsha256sums=(\n    'bb'\n)\n";
+        assert!(!pkgbuild_equivalent_ignoring_whitespace(before, after));
+    }
+
+    #[test]
+    fn gate_treats_whitespace_reflow_as_equivalent() {
+        let before = "pkg=x\nsha256sums=( 'abc'  'def' )\n";
+        let after = "pkg=x\nsha256sums=('abc' 'def')\n";
+        assert!(pkgbuild_equivalent_ignoring_whitespace(before, after));
+    }
+
+    #[test]
+    fn install_hint_maps_known_tools() {
+        assert_eq!(
+            missing_tool_install_hint("updpkgsums"),
+            Some("pacman -S --needed pacman-contrib")
+        );
+        assert_eq!(
+            missing_tool_install_hint("makepkg"),
+            Some("pacman -S --needed base-devel")
+        );
+        assert_eq!(missing_tool_install_hint("git"), None);
+    }
+
+    #[test]
+    fn spawn_context_names_program_and_appends_hint() {
+        let ctx = spawn_error_context("updpkgsums");
+        assert!(ctx.contains("updpkgsums"));
+        assert!(ctx.contains("pacman -S --needed pacman-contrib"));
+
+        let ctx = spawn_error_context("makepkg");
+        assert!(ctx.contains("makepkg"));
+        assert!(ctx.contains("pacman -S --needed base-devel"));
+
+        let ctx = spawn_error_context("some-tool");
+        assert!(ctx.contains("some-tool"));
+        assert!(!ctx.contains("install with"));
     }
 }

@@ -16,6 +16,36 @@ use super::build::LogLine;
 /// - Add extra `!filename` lines locally if you track helper scripts or patches in Git.
 pub const DEFAULT_AUR_GITIGNORE: &str = "*\n!.SRCINFO\n!PKGBUILD\n";
 
+/// Upper bound for captured `git` invocations so a stalled network call
+/// (e.g. an unreachable AUR host) cannot hang a workflow forever.
+const GIT_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// What: Builds a `git` [`Command`] whose SSH transport never prompts interactively.
+///
+/// Output:
+/// - `Command` with `GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=10`.
+///
+/// Details:
+/// - Mirrors the direct `ssh` probes in `preflight` / `aur_ssh` so git-over-SSH fails
+///   fast instead of blocking on a passphrase or host-key prompt on a worker thread.
+/// - Harmless for local `file://` remotes (the SSH transport is simply unused).
+fn git_command() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o ConnectTimeout=10",
+    );
+    cmd
+}
+
+/// Display-only rendering of a command line for error messages (never re-executed).
+fn command_display(cmd: &Command) -> String {
+    let std_cmd = cmd.as_std();
+    let mut parts = vec![std_cmd.get_program().to_string_lossy().into_owned()];
+    parts.extend(std_cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
+    parts.join(" ")
+}
+
 /// What: Writes [`DEFAULT_AUR_GITIGNORE`] to `package_dir/.gitignore` when the file is absent.
 ///
 /// Inputs:
@@ -655,6 +685,110 @@ mod tests {
 
     fn rm_rf_sync(p: &Path) {
         let _ = std::fs::remove_dir_all(p);
+    }
+
+    fn git_ok(dir: &Path, args: &[&str]) {
+        let st = StdCommand::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .expect("spawn git");
+        assert!(st.success(), "git {args:?} failed in {}", dir.display());
+    }
+
+    /// Creates `<root>/remote.git` (bare) plus a clone at `<root>/wc` whose pushed
+    /// `master` HEAD contains `PKGBUILD` and `.SRCINFO`. Returns `(bare, wc)`.
+    fn seed_remote_with_pkgbuild_and_srcinfo(root: &Path) -> (PathBuf, PathBuf) {
+        let bare = root.join("remote.git");
+        let wc = root.join("wc");
+        assert!(
+            StdCommand::new("git")
+                .args(["init", "--bare"])
+                .arg(&bare)
+                .status()
+                .expect("init bare")
+                .success()
+        );
+        assert!(
+            StdCommand::new("git")
+                .arg("clone")
+                .arg(format!("file://{}", bare.display()))
+                .arg(&wc)
+                .status()
+                .expect("clone")
+                .success()
+        );
+        git_ok(&wc, &["config", "user.email", "t@t"]);
+        git_ok(&wc, &["config", "user.name", "t"]);
+        // Production clones run `ensure_named_master_branch`; keep `HEAD` on master so
+        // `git push origin HEAD` targets the same branch the assertions read.
+        git_ok(&wc, &["branch", "-M", "master"]);
+        std::fs::write(wc.join("PKGBUILD"), "pkgname=demo\npkgver=1\npkgrel=1\n")
+            .expect("write PKGBUILD");
+        std::fs::write(wc.join(".SRCINFO"), "pkgbase = demo\n").expect("write .SRCINFO");
+        git_ok(&wc, &["add", "PKGBUILD", ".SRCINFO"]);
+        git_ok(&wc, &["commit", "-m", "initial import"]);
+        git_ok(&wc, &["push", "origin", "HEAD:master"]);
+        (bare, wc)
+    }
+
+    fn bare_master_rev(bare: &Path) -> String {
+        let out = StdCommand::new("git")
+            .arg("-C")
+            .arg(bare)
+            .args(["rev-parse", "master"])
+            .output()
+            .expect("rev-parse master");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[tokio::test]
+    async fn commit_and_push_is_noop_with_only_untracked_files() {
+        let root = workspace_test_dir("aur_git_test_commit_untracked_noop");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let (bare, wc) = seed_remote_with_pkgbuild_and_srcinfo(&root);
+        let before = bare_master_rev(&bare);
+        std::fs::write(wc.join("junk.pkg.tar.zst"), b"not a real package").expect("write junk");
+
+        let (tx, rx) = async_channel::unbounded::<LogLine>();
+        let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
+        let res = commit_and_push(&wc, "update", &tx).await;
+        drop(tx);
+        let _ = drain.await;
+        res.expect("untracked build artefacts must not fail commit_and_push");
+        assert_eq!(
+            bare_master_rev(&bare),
+            before,
+            "no commit should have been pushed"
+        );
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn commit_and_push_pushes_real_pkgbuild_change() {
+        let root = workspace_test_dir("aur_git_test_commit_real_change");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let (bare, wc) = seed_remote_with_pkgbuild_and_srcinfo(&root);
+        let before = bare_master_rev(&bare);
+        std::fs::write(wc.join("PKGBUILD"), "pkgname=demo\npkgver=2\npkgrel=1\n")
+            .expect("bump PKGBUILD");
+
+        let (tx, rx) = async_channel::unbounded::<LogLine>();
+        let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
+        let res = commit_and_push(&wc, "bump to 2", &tx).await;
+        drop(tx);
+        let _ = drain.await;
+        res.expect("real PKGBUILD change must commit and push");
+        assert_ne!(
+            bare_master_rev(&bare),
+            before,
+            "remote master should have advanced"
+        );
+        rm_rf_sync(&root);
     }
 
     #[tokio::test]
