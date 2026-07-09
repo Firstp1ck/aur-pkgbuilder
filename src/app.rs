@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use adw::{Application, ApplicationWindow, NavigationView};
+use adw::{AlertDialog, Application, ApplicationWindow, NavigationView};
 
 use crate::config::Config;
 use crate::i18n;
@@ -10,7 +10,16 @@ use crate::workflow::registry::Registry;
 pub const APP_ID: &str = "io.github.firstp1ck.aur_pkgbuilder";
 
 pub fn build(app: &Application) {
-    let state = AppState::new(Config::load(), Registry::load());
+    let mut load_errors = Vec::new();
+    let config = Config::load().unwrap_or_else(|error| {
+        load_errors.push(error.to_string());
+        Config::default()
+    });
+    let registry = Registry::load().unwrap_or_else(|error| {
+        load_errors.push(error.to_string());
+        Registry::default()
+    });
+    let state = AppState::new(config, registry);
     restore_last_opened_package(&state);
 
     let nav = NavigationView::new();
@@ -36,12 +45,36 @@ pub fn build(app: &Application) {
         .height_request(MIN_MAIN_H)
         .content(&nav)
         .build();
+    {
+        let state = state.clone();
+        window.connect_close_request(move |_| {
+            if let Some(session) = state.borrow_mut().ssh_agent_session.take() {
+                let _ = crate::workflow::ssh_setup::terminate_ssh_agent_session(&session);
+            }
+            gtk4::glib::Propagation::Proceed
+        });
+    }
     window.present();
     ui::input_escape::attach(&window);
 
+    let load_failed = !load_errors.is_empty();
+    if load_failed {
+        let body = format!(
+            "aur-pkgbuilder could not load saved data and will not overwrite the invalid file. Fix or move the named file, then restart.\n\n{}",
+            load_errors.join("\n\n")
+        );
+        let dialog = AlertDialog::new(Some("Saved data could not be loaded"), Some(&body));
+        dialog.add_responses(&[("ok", "_OK")]);
+        dialog.choose(
+            Some(&window),
+            Option::<&gtk4::gio::Cancellable>::None,
+            |_| {},
+        );
+    }
+
     // First-launch onboarding: no saved AUR username and no registered
     // packages means the user has never completed the import flow.
-    let needs_onboarding = {
+    let needs_onboarding = !load_failed && {
         let st = state.borrow();
         st.config.aur_username.is_none() && st.registry.packages.is_empty()
     };

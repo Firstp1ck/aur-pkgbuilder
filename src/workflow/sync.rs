@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
+use reqwest::header::CONTENT_TYPE;
 use thiserror::Error;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 use super::package::PackageDef;
 
@@ -11,6 +14,8 @@ use super::package::PackageDef;
 fn pkgbuild_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
         .build()
 }
 
@@ -230,22 +235,84 @@ pub async fn download_pkgbuild(
         .with_context(|| format!("creating {}", dir.display()))?;
 
     let t = trimmed_http_pkgbuild_url(url).map_err(anyhow::Error::from)?;
-    let body = pkgbuild_http_client()
+    let response = pkgbuild_http_client()
         .context("building HTTP client")?
         .get(t)
         .send()
         .await
         .with_context(|| format!("GET {t}"))?
         .error_for_status()
-        .with_context(|| format!("GET {t} returned an error"))?
-        .text()
-        .await?;
+        .with_context(|| format!("GET {t} returned an error"))?;
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let bytes = response.bytes().await?;
+    let body = validate_pkgbuild_body(content_type.as_deref(), &bytes)?;
 
     let target = dir.join("PKGBUILD");
-    fs::write(&target, body)
-        .await
-        .with_context(|| format!("writing {}", target.display()))?;
+    atomic_write(&target, body.as_bytes()).await?;
     Ok(target)
+}
+
+fn validate_pkgbuild_body(content_type: Option<&str>, bytes: &[u8]) -> Result<String> {
+    if let Some(raw) = content_type {
+        let media_type = raw
+            .split(';')
+            .next()
+            .unwrap_or(raw)
+            .trim()
+            .to_ascii_lowercase();
+        let text_like = media_type.starts_with("text/")
+            || matches!(
+                media_type.as_str(),
+                "application/octet-stream" | "application/x-sh" | "application/x-shellscript"
+            );
+        if !text_like {
+            anyhow::bail!("refusing non-text PKGBUILD response ({media_type})");
+        }
+    }
+    let text = String::from_utf8(bytes.to_vec()).context("PKGBUILD response is not UTF-8 text")?;
+    let leading = text.trim_start().to_ascii_lowercase();
+    if leading.starts_with("<!doctype html") || leading.starts_with("<html") {
+        anyhow::bail!("refusing HTML response; use a raw PKGBUILD URL");
+    }
+    Ok(text)
+}
+
+async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("PKGBUILD target has no parent directory")?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = parent.join(format!(".PKGBUILD.{}.{stamp}.tmp", std::process::id()));
+    let write_result = async {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+            .await
+            .with_context(|| format!("creating {}", tmp.display()))?;
+        file.write_all(bytes)
+            .await
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        file.sync_all()
+            .await
+            .with_context(|| format!("syncing {}", tmp.display()))?;
+        drop(file);
+        fs::rename(&tmp, path)
+            .await
+            .with_context(|| format!("replacing {}", path.display()))
+    }
+    .await;
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp).await;
+    }
+    write_result
 }
 
 /// What: Downloads PKGBUILD text from `url` without writing to disk.
@@ -399,5 +466,19 @@ mod tests {
             pkgbuild_url_precheck("file:///x/PKGBUILD").unwrap_err(),
             PkgbuildUrlProbeError::InvalidScheme
         ));
+    }
+
+    #[test]
+    fn pkgbuild_body_rejects_html_and_binary_content() {
+        assert!(validate_pkgbuild_body(Some("text/html"), b"<!DOCTYPE html><html>").is_err());
+        assert!(validate_pkgbuild_body(Some("image/png"), b"not really png").is_err());
+        assert!(validate_pkgbuild_body(None, b"  <html>portal</html>").is_err());
+    }
+
+    #[test]
+    fn pkgbuild_body_accepts_plain_utf8_text() {
+        let body = validate_pkgbuild_body(Some("text/plain; charset=utf-8"), b"pkgname=demo\n")
+            .expect("plain PKGBUILD");
+        assert_eq!(body, "pkgname=demo\n");
     }
 }

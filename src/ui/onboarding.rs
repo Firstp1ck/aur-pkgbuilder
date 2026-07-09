@@ -141,10 +141,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 toasts.add_toast(Toast::new(&i18n::t("onboarding.toast_enter_username")));
                 return;
             }
-            state.borrow_mut().config.aur_username = Some(username.clone());
-            let _ = state.borrow().config.save();
-            shell.refresh_connection_aur_username_field(&state);
-
             fetch_spinner.start();
             fetch_btn_inner.set_sensitive(false);
             ui::clear_boxed_list(&results_list);
@@ -157,11 +153,24 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let selections = selections.clone();
             let import_btn = import_btn.clone();
             let toasts = toasts.clone();
+            let state_done = state.clone();
+            let shell_done = shell.clone();
+            let username_done = username.clone();
             runtime::spawn(
                 async move { aur_account::fetch_my_packages(&username).await },
                 move |res| {
                     fetch_spinner.stop();
                     fetch_btn_inner.set_sensitive(true);
+                    if res.is_ok() {
+                        state_done.borrow_mut().config.aur_username = Some(username_done.clone());
+                        if let Err(error) = state_done.borrow().config.save() {
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "onboarding.toast_save_failed",
+                                &[("err", error.to_string().as_str())],
+                            )));
+                        }
+                        shell_done.refresh_connection_aur_username_field(&state_done);
+                    }
                     match res {
                         Ok(packages) if packages.is_empty() => {
                             let row = ActionRow::builder()
@@ -231,8 +240,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 for summary in picked {
                     st.registry.upsert(aur_account::to_package_def(&summary));
                 }
-                let _ = st.registry.save();
+                if let Err(error) = st.registry.save() {
+                    toasts.add_toast(Toast::new(&i18n::tf(
+                        "onboarding.toast_save_failed",
+                        &[("err", error.to_string().as_str())],
+                    )));
+                    return;
+                }
             }
+            shell.refresh_manage_tab_page(&state);
             toasts.add_toast(Toast::new(&i18n::tf(
                 "onboarding.toast_imported_n",
                 &[("n", &count.to_string())],

@@ -24,6 +24,10 @@ aur_ssh.section_voting_desc: Betreffen nur Ihre Beziehung zum Paket.
 aur_ssh.section_voting_title: Abstimmung & Benachrichtigungen
 aur_ssh.subtitle: Verbindung zu aur@aur.archlinux.org mit der kuratierten Befehlsliste, die Maintainer üblicherweise manuell
   nutzen. Der gewählte SSH-Schlüssel wird automatisch verwendet.
+aur_ssh.confirm_body: 'Destruktiven Befehl {cmd} für Paket {package} ausführen? Dies kann AUR-Eigentümerschaft oder Repository-Status sofort ändern.'
+aur_ssh.confirm_cancel: Abbrechen
+aur_ssh.confirm_run: Destruktiven Befehl ausführen
+aur_ssh.confirm_title: Destruktiven AUR-Befehl bestätigen
 aur_ssh.toast_enter_name: Bitte zuerst einen Paketnamen eingeben.
 aur_ssh.toast_err: '{cmd}: {err}'
 aur_ssh.toast_exit: '{cmd}: beendet mit {status}'
@@ -69,8 +73,10 @@ build.makepkg_exit: makepkg beendet mit {status}
 build.option_clean: Build-Baum nach Erfolg aufräumen (--clean)
 build.option_nobuild: Nur vorbereiten (--nobuild)
 build.status_building: baue…
+build.status_sources_prepared: Quellen vorbereitet (kein Paket wurde gebaut)
 build.status_succeeded: Build erfolgreich
 build.toast_done: Build abgeschlossen
+build.toast_sources_prepared: Quellen vorbereitet; vor dem Veröffentlichen einen vollständigen Build ausführen
 build.toast_error: Build-Fehler
 build.toast_failed: Build fehlgeschlagen
 build.toast_no_pkg: Wählen Sie zuerst ein Paket auf der Startseite, bevor Sie bauen.
@@ -115,6 +121,7 @@ connection.toast_file_picker: Dateiauswahl konnte nicht geöffnet werden.
 connection.toast_folder_picker: Ordnerauswahl konnte nicht geöffnet werden.
 connection.toast_no_parent_window: Kein Elternfenster zum Öffnen des Pfads gefunden.
 connection.toast_open_path_failed: '{path} konnte nicht geöffnet werden: {err}'
+connection.toast_save_failed: 'Verbindungseinstellungen konnten nicht gespeichert werden: {error}'
 connection.tool_row.detail_hint: '{detail} — {hint}'
 connection.tool_row.missing: 'fehlt — installieren: {hint}'
 connection.tool_row.purpose_path: '{purpose} — nutzt `{via}`'
@@ -280,7 +287,8 @@ manage.upstream_ok_toast: '{pkg}: PKGBUILD auf der Platte entspricht Upstream (p
 manage.upstream_title_diff: Upstream-Prüfung — Diff prüfen
 manage.upstream_title_report: Upstream-Prüfung — Bericht
 manage.upstream_toast: Ein oder mehrere Pakete weichen vom Upstream ab oder sind fehlgeschlagen — siehe Berichtsfenster.
-manage.upstream_window_title: '{pkg} — PKGBUILD vs. Upstream'
+manage.upstream_window_title: '{pkg} — Upstream-PKGBUILD ist neuer'
+manage.upstream_local_window_title: '{pkg} — lokal geändert oder voraus'
 manage.upstream_diff_body: |-
   pkgver: {local} (lokal) → {upstream} (Upstream)
 
@@ -292,6 +300,7 @@ manage.bulk_report_col_status: Status
 manage.bulk_report_col_details: Details
 manage.bulk_report_status_up_to_date: aktuell
 manage.bulk_report_status_outdated: veraltet
+manage.bulk_report_status_local: lokal/voraus
 manage.bulk_report_status_preview: Vorschau
 manage.bulk_report_status_error: Fehler
 manage.bulk_report_pkgver: 'pkgver {version}'
@@ -329,6 +338,7 @@ onboarding.toast_fetch_failed: 'Abrufen fehlgeschlagen: {err}'
 onboarding.toast_found_n: '{n} Paket(e) gefunden'
 onboarding.toast_imported_n: '{n} Paket(e) importiert'
 onboarding.toast_no_packages: Für diesen Benutzer keine Pakete gefunden
+onboarding.toast_save_failed: 'Onboarding-Daten konnten nicht gespeichert werden: {err}'
 onboarding.toast_select_one: Mindestens ein Paket auswählen.
 onboarding.username_title: AUR-Benutzername
 package.hint.bin_suffix: 'AUR-Konvention: Bei Art „Binär“ endet die pkgbase üblicherweise auf „-bin“. Speichern ist trotzdem
@@ -380,6 +390,10 @@ package_editor.blurb_edit: Pflichtfelder sind mit * markiert. Anzeigetitel, Kurz
 pkgbuild_editor.banner_no_home_pkg: Auf der Startseite ist kein Paket ausgewählt.
 pkgbuild_editor.btn_apply: Schnellfelder anwenden
 pkgbuild_editor.btn_reload: Neu laden
+pkgbuild_editor.reload_confirm_body: Beim Neuladen wird der ungespeicherte Editorinhalt durch die PKGBUILD auf der Festplatte ersetzt.
+pkgbuild_editor.reload_confirm_cancel: Weiter bearbeiten
+pkgbuild_editor.reload_confirm_discard: Verwerfen und neu laden
+pkgbuild_editor.reload_confirm_title: Ungespeicherte PKGBUILD-Änderungen verwerfen?
 pkgbuild_editor.btn_save: Speichern
 pkgbuild_editor.btn_srcinfo: .SRCINFO
 pkgbuild_editor.diff_more_removed: … (weitere entfernte Zeilen nicht angezeigt)
@@ -700,6 +714,12 @@ ssh_setup.done_hint_connection: SSH-Test erneut ausführen, um zu bestätigen.
 ssh_setup.done_back_onboarding: Einrichtung abschließen
 ssh_setup.done_hint_onboarding: SSH-Test oben (oder auf „Verbindung“) ausführen, wenn Veröffentlichen SSH noch als ungeprüft meldet.
 ssh_setup.op_failed: 'Fehlgeschlagen: {err}'
+ssh_probe.connected: verbunden
+ssh_probe.error: Fehler
+ssh_probe.failed_exit: fehlgeschlagen (Exit {code})
+ssh_probe.key_rejected: Schlüssel abgelehnt
+ssh_probe.probing: prüfe…
+ssh_probe.save_failed: SSH-Einstellungen konnten nicht gespeichert werden
 sync.browse: Durchsuchen…
 sync.choose_destination: Zielordner wählen
 sync.dest_row_title: Zielverzeichnis
@@ -729,6 +749,7 @@ sync.section_publish_desc: „Veröffentlichen“ kopiert PKGBUILD und .SRCINFO 
   bei Bedarf Commits. Ein erfolgreicher Push aktualisiert das öffentliche AUR sofort. Bei einer brandneuen pkgbase kann der
   erste Klon warnen, dass das Repository leer ist — das ist erwartet.
 sync.btn_download: PKGBUILD herunterladen
+sync.btn_retry_probe: Quellenprüfung wiederholen
 sync.btn_continue: Weiter
 sync.page_title: PKGBUILD synchronisieren
 sync.status_saved_to: 'gespeichert unter {path}'

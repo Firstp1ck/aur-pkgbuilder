@@ -107,7 +107,7 @@ pub async fn run_updpkgsums(
         }
     };
 
-    if checksum_arrays_equivalent(before_s, after_s) {
+    if pkgbuild_equivalent_ignoring_whitespace(before_s, after_s) {
         tokio::fs::write(&pkg, &before)
             .await
             .with_context(|| format!("restore {}", pkg.display()))?;
@@ -131,29 +131,44 @@ pub async fn run_updpkgsums(
     })
 }
 
-/// Temporary stub delegating to the legacy per-key comparison (to be replaced).
+/// Returns whether two complete PKGBUILDs differ only by ASCII whitespace.
+///
+/// `updpkgsums` occasionally reformats arrays without changing values. Comparing
+/// the complete file is deliberately conservative: any changed checksum key,
+/// including arch-specific or multiline arrays, keeps the rewritten file.
 fn pkgbuild_equivalent_ignoring_whitespace(before: &str, after: &str) -> bool {
-    checksum_arrays_equivalent(before, after)
+    normalize_whitespace(before) == normalize_whitespace(after)
 }
 
-/// Temporary stub (to be replaced).
-fn missing_tool_install_hint(_program: &str) -> Option<&'static str> {
-    None
-}
-
-/// Temporary stub (to be replaced).
-fn spawn_error_context(_program: &str) -> String {
-    "spawning child process".into()
-}
-
-const CHECKSUM_KEYS: &[&str] = &["sha256sums", "sha512sums", "md5sums", "b2sums"];
-
-/// Strips all ASCII whitespace so `'SKIP'` and `"SKIP"` compare equal.
-fn normalize_checksum_text(s: &str) -> String {
+fn normalize_whitespace(s: &str) -> String {
     s.chars().filter(|c| !c.is_ascii_whitespace()).collect()
 }
 
+fn missing_tool_install_hint(program: &str) -> Option<&'static str> {
+    match program {
+        "updpkgsums" => Some("pacman -S --needed pacman-contrib"),
+        "makepkg" => Some("pacman -S --needed base-devel"),
+        _ => None,
+    }
+}
+
+fn spawn_error_context(program: &str) -> String {
+    match missing_tool_install_hint(program) {
+        Some(hint) => format!("spawning {program}; if it is missing, install with `{hint}`"),
+        None => format!("spawning {program}"),
+    }
+}
+
+#[cfg(test)]
+const CHECKSUM_KEYS: &[&str] = &["sha256sums", "sha512sums", "md5sums", "b2sums"];
+
+#[cfg(test)]
+fn normalize_checksum_text(s: &str) -> String {
+    normalize_whitespace(s)
+}
+
 /// Returns the parenthetical `( … )` starting at `open_idx`, or `None` if not balanced.
+#[cfg(test)]
 fn slice_balanced_parens(src: &str, open_idx: usize) -> Option<&str> {
     let bytes = src.as_bytes();
     if open_idx >= bytes.len() || bytes[open_idx] != b'(' {
@@ -179,6 +194,7 @@ fn slice_balanced_parens(src: &str, open_idx: usize) -> Option<&str> {
 
 /// Extracts `key=(…)` from a single logical line (PKGBUILD checksum arrays are
 /// almost always single-line).
+#[cfg(test)]
 fn extract_key_array_from_line(line: &str, key: &str) -> Option<String> {
     let t = line.trim_start();
     if t.starts_with('#') {
@@ -193,6 +209,7 @@ fn extract_key_array_from_line(line: &str, key: &str) -> Option<String> {
     slice_balanced_parens(t, open_in_t).map(str::to_string)
 }
 
+#[cfg(test)]
 fn extract_checksum_array(src: &str, key: &str) -> Option<String> {
     for line in src.lines() {
         if let Some(block) = extract_key_array_from_line(line, key) {
@@ -204,6 +221,7 @@ fn extract_checksum_array(src: &str, key: &str) -> Option<String> {
 
 /// `true` when every checksum key declared in **both** files matches pairwise
 /// after whitespace normalization (and at least one such key exists).
+#[cfg(test)]
 fn checksum_arrays_equivalent(before: &str, after: &str) -> bool {
     let mut compared_any = false;
     for key in CHECKSUM_KEYS {
@@ -239,7 +257,7 @@ pub async fn write_srcinfo(package_dir: &Path, events: &Sender<LogLine>) -> Resu
         .stderr(Stdio::piped())
         .output()
         .await
-        .context("spawning makepkg --printsrcinfo")?;
+        .with_context(|| spawn_error_context("makepkg"))?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr).to_string();
         let _ = events.send(LogLine::Stderr(err.clone())).await;
@@ -276,13 +294,14 @@ async fn run(
     cwd: &Path,
     events: &Sender<LogLine>,
 ) -> Result<std::process::ExitStatus> {
+    let program = cmd.as_std().get_program().to_string_lossy().into_owned();
     let mut child = cmd
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("spawning child process")?;
+        .with_context(|| spawn_error_context(&program))?;
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");

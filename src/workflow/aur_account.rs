@@ -12,6 +12,7 @@
 //! - [`to_package_def`] — turn a summary into a registry [`PackageDef`].
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use anyhow::Context;
 use serde::Deserialize;
@@ -21,6 +22,17 @@ use super::package::{PackageDef, PackageKind};
 
 const AUR_RPC: &str = "https://aur.archlinux.org/rpc/";
 const RPC_VERSION: u8 = 5;
+const RPC_TIMEOUT: Duration = Duration::from_secs(20);
+const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn rpc_client() -> Result<reqwest::Client, AurAccountError> {
+    reqwest::Client::builder()
+        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION"),))
+        .timeout(RPC_TIMEOUT)
+        .connect_timeout(RPC_CONNECT_TIMEOUT)
+        .build()
+        .map_err(|e| AurAccountError::Other(anyhow::anyhow!(e)))
+}
 
 #[derive(Debug, Error)]
 pub enum AurAccountError {
@@ -74,10 +86,7 @@ pub async fn fetch_my_packages(username: &str) -> Result<Vec<AurPackageSummary>,
         return Err(AurAccountError::Rpc("username is empty".into()));
     }
 
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION"),))
-        .build()
-        .map_err(|e| AurAccountError::Other(anyhow::anyhow!(e)))?;
+    let client = rpc_client()?;
 
     let maintainer = fetch_by(&client, "maintainer", username).await?;
     let co = fetch_by(&client, "comaintainers", username).await?;
@@ -206,7 +215,7 @@ pub fn to_package_def(summary: &AurPackageSummary) -> PackageDef {
             .clone()
             .unwrap_or_else(|| "Imported from the AUR.".into()),
         kind: infer_kind(&summary.name),
-        pkgbuild_url: aur_pkgbuild_url(&summary.name),
+        pkgbuild_url: aur_pkgbuild_url(summary.package_base.as_deref().unwrap_or(&summary.name)),
         icon_name: None,
         destination_dir: None,
         sync_subdir: None,
@@ -309,10 +318,7 @@ pub async fn aur_pkgbase_exists(name: &str) -> Result<bool, AurAccountError> {
     if trimmed.is_empty() {
         return Ok(false);
     }
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("aur-pkgbuilder/", env!("CARGO_PKG_VERSION"),))
-        .build()
-        .map_err(|e| AurAccountError::Other(anyhow::anyhow!(e)))?;
+    let client = rpc_client()?;
     let resp: RpcResponse = client
         .get(AUR_RPC)
         .query(&[

@@ -91,7 +91,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                     );
                                 }
                             }
-                            let _ = state_cb.borrow().config.save();
+                            if let Err(error) = state_cb.borrow().config.save() {
+                                toasts_cb.add_toast(Toast::new(&i18n::tf(
+                                    "connection.toast_save_failed",
+                                    &[("error", error.to_string().as_str())],
+                                )));
+                            }
                             shell_cb.refresh_home_list(&state_cb);
                             match outcome {
                                 ApplyAurUsernameOutcome::Cleared => {
@@ -243,6 +248,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             Some(PathBuf::from(text))
         };
     });
+    {
+        let state = state.clone();
+        let toasts = toasts.clone();
+        workdir_row.connect_notify_local(Some("has-focus"), move |row, _| {
+            if !row.has_focus() {
+                save_config(&state, &toasts);
+            }
+        });
+    }
 
     let sshkey = {
         let cfg = &state.borrow().config;
@@ -261,6 +275,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             Some(PathBuf::from(text))
         };
     });
+    {
+        let state = state.clone();
+        let toasts = toasts.clone();
+        ssh_row.connect_notify_local(Some("has-focus"), move |row, _| {
+            if !row.has_focus() {
+                save_config(&state, &toasts);
+            }
+        });
+    }
 
     let browse_work = Button::builder()
         .icon_name("folder-open-symbolic")
@@ -281,6 +304,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let start = path_from_entry_or_config(&row, || state.borrow().config.work_dir.clone());
             let row = row.clone();
             let state = state.clone();
+            let toasts_pick = toasts.clone();
             let dlg_title = i18n::t("connection.choose_workdir");
             folder_pick::pick_folder(&parent, &dlg_title, start.as_deref(), move |picked| {
                 let Some(path) = picked else {
@@ -288,7 +312,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 };
                 row.set_text(&path.to_string_lossy());
                 state.borrow_mut().config.work_dir = Some(path);
-                save_config(&state);
+                save_config(&state, &toasts_pick);
             });
         });
     }
@@ -312,6 +336,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let start = path_from_entry_or_config(&row, || state.borrow().config.ssh_key.clone());
             let row = row.clone();
             let state = state.clone();
+            let toasts_pick = toasts.clone();
             let dlg_title = i18n::t("connection.choose_ssh_key");
             folder_pick::pick_existing_file(&parent, &dlg_title, start.as_deref(), move |picked| {
                 let Some(path) = picked else {
@@ -319,7 +344,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 };
                 row.set_text(&path.to_string_lossy());
                 state.borrow_mut().config.ssh_key = Some(path);
-                save_config(&state);
+                save_config(&state, &toasts_pick);
             });
         });
     }
@@ -422,8 +447,9 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     {
         let shell = shell.clone();
         let state = state.clone();
+        let toasts = toasts.clone();
         continue_btn.connect_clicked(move |_| {
-            save_config(&state);
+            save_config(&state, &toasts);
             shell.goto_tab(&state, ProcessTab::Sync);
         });
     }
@@ -447,9 +473,14 @@ fn path_from_entry_or_config(
     }
 }
 
-fn save_config(state: &AppStateRef) {
+fn save_config(state: &AppStateRef, toasts: &ToastOverlay) {
     let cfg = state.borrow().config.clone();
-    let _ = cfg.save();
+    if let Err(error) = cfg.save() {
+        toasts.add_toast(Toast::new(&i18n::tf(
+            "connection.toast_save_failed",
+            &[("error", error.to_string().as_str())],
+        )));
+    }
 }
 
 fn format_unmatched_list(ids: &[String]) -> String {

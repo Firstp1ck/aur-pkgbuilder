@@ -145,6 +145,11 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     content.append(&status);
 
     let spinner = Spinner::new();
+    let retry_probe_btn = Button::builder()
+        .label(i18n::t("sync.btn_retry_probe"))
+        .sensitive(false)
+        .css_classes(vec!["pill"])
+        .build();
     let download_btn = Button::builder()
         .label(i18n::t("sync.btn_download"))
         .sensitive(false)
@@ -162,6 +167,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         .halign(Align::End)
         .build();
     row_btns.append(&spinner);
+    row_btns.append(&retry_probe_btn);
     row_btns.append(&download_btn);
     row_btns.append(&continue_btn);
     content.append(&row_btns);
@@ -187,6 +193,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let status_pb = status.clone();
             let spinner_pb = spinner.clone();
             let download_btn_pb = download_btn.clone();
+            let retry_probe_btn_pb = retry_probe_btn.clone();
             let toasts_pb = toasts.clone();
             let url_pb = pkg.pkgbuild_url.clone();
             let source_cell = source_reachable.clone();
@@ -198,6 +205,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 },
                 move |res| {
                     spinner_pb.stop();
+                    retry_probe_btn_pb.set_sensitive(true);
                     match res {
                         Ok(()) => {
                             source_cell.set(Some(true));
@@ -217,6 +225,60 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 },
             );
         }
+    }
+
+    {
+        let state = state.clone();
+        let status = status.clone();
+        let spinner = spinner.clone();
+        let download_btn = download_btn.clone();
+        let retry_probe_btn_inner = retry_probe_btn.clone();
+        let toasts = toasts.clone();
+        let source_cell = source_reachable.clone();
+        let url = pkg.pkgbuild_url.clone();
+        retry_probe_btn.connect_clicked(move |_| {
+            spinner.start();
+            retry_probe_btn_inner.set_sensitive(false);
+            download_btn.set_sensitive(false);
+            status.set_text(&i18n::t("sync.status_precheck"));
+            let state_done = state.clone();
+            let status_done = status.clone();
+            let spinner_done = spinner.clone();
+            let download_done = download_btn.clone();
+            let retry_done = retry_probe_btn_inner.clone();
+            let toasts_done = toasts.clone();
+            let source_done = source_cell.clone();
+            let url = url.clone();
+            runtime::spawn(
+                async move {
+                    sync_wf::probe_pkgbuild_url(&url)
+                        .await
+                        .map_err(|error| error.to_string())
+                },
+                move |result| {
+                    spinner_done.stop();
+                    retry_done.set_sensitive(true);
+                    match result {
+                        Ok(()) => {
+                            source_done.set(Some(true));
+                            status_done.set_text(&i18n::t("sync.status_source_ok"));
+                        }
+                        Err(message) => {
+                            source_done.set(Some(false));
+                            status_done.set_text(&i18n::tf(
+                                "sync.status_source_bad",
+                                &[("msg", message.as_str())],
+                            ));
+                            toasts_done.add_toast(Toast::new(&i18n::tf(
+                                "sync.toast_download_disabled",
+                                &[("msg", message.as_str())],
+                            )));
+                        }
+                    }
+                    apply_download_button_state(&state_done, &download_done, source_done.get());
+                },
+            );
+        });
     }
 
     {
@@ -327,7 +389,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                 &[("path", &path.display().to_string())],
                             ));
                             state2.borrow_mut().pkgbuild_path = Some(path);
-                            package::record_pkgbuild_refresh(&state2);
+                            if let Err(error) = package::record_pkgbuild_refresh(&state2) {
+                                toasts.add_toast(Toast::new(&i18n::tf(
+                                    "sync.toast_registry_save",
+                                    &[("e", error.to_string().as_str())],
+                                )));
+                            }
                             shell_dl.refresh_version_tab_page(&state2);
                             continue_btn.set_sensitive(true);
                             toasts.add_toast(Toast::new(&i18n::t("sync.toast_downloaded")));

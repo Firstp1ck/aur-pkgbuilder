@@ -130,16 +130,16 @@ pub fn pkgbuild_stale_message(last: Option<i64>, now_unix: i64) -> Option<String
 }
 
 /// Records that the current package’s PKGBUILD was refreshed from upstream or disk.
-pub fn record_pkgbuild_refresh(state: &crate::state::AppStateRef) {
+pub fn record_pkgbuild_refresh(state: &crate::state::AppStateRef) -> anyhow::Result<()> {
     let now = pkgbuild_refresh_clock_now();
     let mut st = state.borrow_mut();
     let Some(ref mut pkg) = st.package else {
-        return;
+        return Ok(());
     };
     pkg.pkgbuild_refreshed_at_unix = Some(now);
     let snapshot = pkg.clone();
     st.registry.upsert(snapshot);
-    let _ = st.registry.save();
+    st.registry.save()
 }
 
 /// What: Records a PKGBUILD **Reload** for a registry row when that package is not the Home selection.
@@ -152,14 +152,17 @@ pub fn record_pkgbuild_refresh(state: &crate::state::AppStateRef) {
 ///
 /// Details:
 /// - Used by the Register wizard’s PKGBUILD editor ([`crate::ui::pkgbuild_editor`]) so staleness metadata stays accurate.
-pub fn record_pkgbuild_refresh_by_id(state: &crate::state::AppStateRef, pkg_id: &str) {
+pub fn record_pkgbuild_refresh_by_id(
+    state: &crate::state::AppStateRef,
+    pkg_id: &str,
+) -> anyhow::Result<()> {
     let now = pkgbuild_refresh_clock_now();
     let mut st = state.borrow_mut();
     let Some(pkg) = st.registry.packages.iter_mut().find(|p| p.id == pkg_id) else {
-        return;
+        return Ok(());
     };
     pkg.pkgbuild_refreshed_at_unix = Some(now);
-    let _ = st.registry.save();
+    st.registry.save()
 }
 
 impl PackageDef {

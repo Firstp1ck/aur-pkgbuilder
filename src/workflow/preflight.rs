@@ -321,24 +321,19 @@ pub fn packaging_config_path(target: PackagingConfigTarget) -> &'static Path {
     target.abs_path()
 }
 
-async fn which(program: &str) -> Option<PathBuf> {
-    let output = Command::new("which")
-        .arg(program)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
+/// Resolve an executable by scanning `PATH` without depending on an external `which` binary.
+pub fn find_executable_in_path(program: &str) -> Option<PathBuf> {
+    if program.is_empty() || program.contains('/') {
         return None;
     }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(s))
-    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+async fn which(program: &str) -> Option<PathBuf> {
+    find_executable_in_path(program)
 }
 
 #[derive(Debug, Clone)]
@@ -351,16 +346,16 @@ pub enum SshProbe {
     Failed { stderr: String, exit_code: i32 },
 }
 
-/// Probe the AUR SSH endpoint. We use `-T` (no tty), `BatchMode=yes`
-/// (no password prompt), and `StrictHostKeyChecking=accept-new` so the
-/// first-run flow does not hang waiting for "yes".
+/// Probe the AUR SSH endpoint. We use `-T` (no tty), `BatchMode=yes`, and
+/// `StrictHostKeyChecking=yes` so the probe never prompts or silently trusts
+/// a new host key. Unknown hosts must be added through the verified SSH setup flow.
 pub async fn probe_aur_ssh(key: Option<&Path>) -> Result<SshProbe> {
     let mut cmd = Command::new("ssh");
     cmd.arg("-T")
         .arg("-o")
         .arg("BatchMode=yes")
         .arg("-o")
-        .arg("StrictHostKeyChecking=accept-new")
+        .arg("StrictHostKeyChecking=yes")
         .arg("-o")
         .arg("ConnectTimeout=10");
     if let Some(key) = key {

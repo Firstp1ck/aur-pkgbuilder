@@ -16,7 +16,11 @@ pub struct AppState {
     pub registry: Registry,
     pub package: Option<PackageDef>,
     pub pkgbuild_path: Option<PathBuf>,
+    /// Unsaved text in the selected package's embedded Version editor.
+    pub pkgbuild_editor_dirty: bool,
     pub ssh_ok: bool,
+    /// Prevent periodic connection probes from rebuilding Publish while Git work is active.
+    pub publish_operation_active: bool,
     /// `PackageDef::id` values not returned as **maintainer or co-maintainer** for
     /// `config.aur_username` in the last successful AUR RPC check (Connection tab apply).
     /// `None` means no check has succeeded this session, or the username was cleared.
@@ -36,7 +40,9 @@ impl AppState {
             registry,
             package: None,
             pkgbuild_path: None,
+            pkgbuild_editor_dirty: false,
             ssh_ok: false,
+            publish_operation_active: false,
             aur_account_mismatch_ids: None,
             ssh_agent_session: None,
         }))

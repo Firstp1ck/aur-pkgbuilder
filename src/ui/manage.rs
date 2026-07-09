@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 
 use adw::prelude::*;
 use adw::{ActionRow, EntryRow, NavigationPage, PreferencesGroup, Toast, ToastOverlay, Window};
+use gtk4::gio;
 use gtk4::{
-    Align, Box as GtkBox, Button, HeaderBar, Image, Label, ListBox, MenuButton, Orientation,
-    PolicyType, Popover, ScrolledWindow, TextView, WrapMode,
+    Align, Box as GtkBox, Button, FileLauncher, HeaderBar, Image, Label, ListBox, MenuButton,
+    Orientation, PolicyType, Popover, ScrolledWindow, Spinner, TextView, WrapMode,
 };
 
 use crate::i18n;
@@ -101,7 +102,12 @@ fn language_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay)
         {
             let mut st = state_en.borrow_mut();
             st.config.locale = Some(i18n::locale_storage_tag(i18n::UiLocale::EnUs).to_string());
-            let _ = st.config.save();
+            if let Err(error) = st.config.save() {
+                toasts_en.add_toast(Toast::new(&i18n::tf(
+                    "manage.failed",
+                    &[("e", error.to_string().as_str())],
+                )));
+            }
         }
         shell_en.refresh_shell_locale(&state_en);
         if let Some(win) = btn.root().and_downcast::<gtk4::Window>() {
@@ -121,7 +127,12 @@ fn language_group(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay)
         {
             let mut st = state_de.borrow_mut();
             st.config.locale = Some(i18n::locale_storage_tag(i18n::UiLocale::DeDe).to_string());
-            let _ = st.config.save();
+            if let Err(error) = st.config.save() {
+                toasts_de.add_toast(Toast::new(&i18n::tf(
+                    "manage.failed",
+                    &[("e", error.to_string().as_str())],
+                )));
+            }
         }
         shell_de.refresh_shell_locale(&state_de);
         if let Some(win) = btn.root().and_downcast::<gtk4::Window>() {
@@ -216,8 +227,15 @@ fn import_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) -> 
                     Ok(pkg) => {
                         let id = pkg.id.clone();
                         state.borrow_mut().registry.upsert(pkg);
-                        let _ = state.borrow().registry.save();
+                        if let Err(error) = state.borrow().registry.save() {
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "manage.failed",
+                                &[("e", error.to_string().as_str())],
+                            )));
+                            return;
+                        }
                         shell.refresh_tab_headers_from_state(&state);
+                        shell.refresh_manage_tab_page(&state);
                         toasts.add_toast(Toast::new(&i18n::tf("manage.imported", &[("id", &id)])));
                     }
                     Err(AdminError::NotImplemented(what)) => {
@@ -243,7 +261,9 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
         .subtitle(i18n::t("manage.check_all_sub"))
         .build();
     let check_lbl = i18n::t("manage.check_all");
+    let spinner = Spinner::new();
     let btn = primary_button(&check_lbl);
+    row.add_suffix(&spinner);
     row.add_suffix(&btn);
 
     let shell = shell.clone();
@@ -259,11 +279,15 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
             toasts.add_toast(Toast::new(&i18n::t("manage.no_packages_registry")));
             return;
         }
+        btn.set_sensitive(false);
+        spinner.start();
         let toasts_outer = toasts.clone();
         let shell_spawn = shell.clone();
         let state_spawn = state.clone();
         let work_async = work.clone();
         let window = btn.root().and_downcast::<gtk4::Window>();
+        let btn_done = btn.clone();
+        let spinner_done = spinner.clone();
         runtime::spawn(
             async move {
                 let mut out: Vec<(PackageDef, Result<UpdateStatus, AdminError>)> = Vec::new();
@@ -274,6 +298,8 @@ fn check_all_row(shell: &MainShell, state: &AppStateRef, toasts: &ToastOverlay) 
                 out
             },
             move |results| {
+                btn_done.set_sensitive(true);
+                spinner_done.stop();
                 let n = results.len();
                 let all_match = results
                     .iter()
@@ -397,11 +423,17 @@ fn build_row_menu(
         let shell = shell.clone();
         let state = state.clone();
         let popover = popover.clone();
+        let toasts = toasts.clone();
         open_wizard.connect_clicked(move |_| {
             popover.popdown();
             state.borrow_mut().package = Some(pkg.clone());
             state.borrow_mut().config.last_package = Some(pkg.id.clone());
-            let _ = state.borrow().config.save();
+            if let Err(error) = state.borrow().config.save() {
+                toasts.add_toast(Toast::new(&i18n::tf(
+                    "manage.failed",
+                    &[("e", error.to_string().as_str())],
+                )));
+            }
             shell.refresh_tabs_for_package(&state);
             shell.goto_tab(&state, ProcessTab::Connection);
         });
@@ -418,10 +450,31 @@ fn build_row_menu(
             let work = state.borrow().config.work_dir.clone();
             let toasts = toasts.clone();
             let pkg = pkg.clone();
+            let parent = popover.root().and_downcast::<gtk4::Window>();
             runtime::spawn(
                 async move { admin::open_work_dir(work.as_deref(), &pkg).await },
-                move |res| {
-                    render_admin_result(&toasts, res.map(|_| ()), &i18n::t("manage.ok_opened"))
+                move |res| match res {
+                    Ok(path) => {
+                        let file = gio::File::for_path(&path);
+                        let launcher = FileLauncher::new(Some(&file));
+                        let toasts_launch = toasts.clone();
+                        launcher.launch(
+                            parent.as_ref(),
+                            None::<&gio::Cancellable>,
+                            move |result| match result {
+                                Ok(()) => toasts_launch
+                                    .add_toast(Toast::new(&i18n::t("manage.ok_opened"))),
+                                Err(error) => toasts_launch.add_toast(Toast::new(&i18n::tf(
+                                    "manage.failed",
+                                    &[("e", error.to_string().as_str())],
+                                ))),
+                            },
+                        );
+                    }
+                    Err(error) => toasts.add_toast(Toast::new(&i18n::tf(
+                        "manage.failed",
+                        &[("e", error.to_string().as_str())],
+                    ))),
                 },
             );
         });
@@ -456,19 +509,26 @@ fn build_row_menu(
                         local,
                         upstream,
                         diff,
-                    }) => {
-                        let body = i18n::tf(
-                            "manage.upstream_diff_body",
-                            &[
-                                ("local", local.as_str()),
-                                ("upstream", upstream.as_str()),
-                                ("diff", diff.as_str()),
-                            ],
-                        );
-                        let win_title =
-                            i18n::tf("manage.upstream_window_title", &[("pkg", &pkg_id)]);
-                        present_monospace_report_window(window.as_ref(), &win_title, &body, None);
-                    }
+                    }) => present_upstream_diff(
+                        window.as_ref(),
+                        "manage.upstream_window_title",
+                        &pkg_id,
+                        &local,
+                        &upstream,
+                        &diff,
+                    ),
+                    Ok(UpdateStatus::LocallyModified {
+                        local,
+                        upstream,
+                        diff,
+                    }) => present_upstream_diff(
+                        window.as_ref(),
+                        "manage.upstream_local_window_title",
+                        &pkg_id,
+                        &local,
+                        &upstream,
+                        &diff,
+                    ),
                     Err(AdminError::NotImplemented(what)) => {
                         toasts.add_toast(Toast::new(&i18n::tf(
                             "manage.coming_soon",
@@ -628,8 +688,18 @@ fn apply_bulk_pkgbuild_sync_outcome(
     succeeded: &[String],
     failed: &[(String, String)],
 ) {
+    let mut save_error = None;
     for id in succeeded {
-        package::record_pkgbuild_refresh_by_id(state, id);
+        if let Err(error) = package::record_pkgbuild_refresh_by_id(state, id) {
+            save_error = Some(error.to_string());
+            break;
+        }
+    }
+    if let Some(error) = save_error {
+        toasts.add_toast(Toast::new(&i18n::tf(
+            "sync.toast_registry_save",
+            &[("e", error.as_str())],
+        )));
     }
     shell.refresh_tab_headers_from_state(state);
     let refresh_version = state
@@ -749,6 +819,33 @@ fn bulk_upstream_status_col_width() -> usize {
     .clamp(10, 32)
 }
 
+fn append_bulk_diff_status(
+    lines: &mut Vec<String>,
+    id: &str,
+    status_key: &str,
+    local: &str,
+    upstream: &str,
+    diff: &str,
+    widths: (usize, usize),
+) {
+    let (pkg_w, stat_w) = widths;
+    lines.push(format!(
+        "{:<pkg_w$} | {:<stat_w$} | {}",
+        id,
+        i18n::t(status_key),
+        i18n::tf(
+            "manage.bulk_report_pkgver_cmp",
+            &[("local", local), ("upstream", upstream)],
+        ),
+        pkg_w = pkg_w,
+        stat_w = stat_w
+    ));
+    lines.push(i18n::tf(
+        "manage.bulk_report_diff_heading",
+        &[("id", id), ("diff", diff)],
+    ));
+}
+
 fn format_bulk_upstream_report(
     results: &[(PackageDef, Result<UpdateStatus, AdminError>)],
 ) -> String {
@@ -794,23 +891,28 @@ fn format_bulk_upstream_report(
                 local,
                 upstream,
                 diff,
-            }) => {
-                lines.push(format!(
-                    "{:<pkg_w$} | {:<stat_w$} | {}",
-                    id,
-                    i18n::t("manage.bulk_report_status_outdated"),
-                    i18n::tf(
-                        "manage.bulk_report_pkgver_cmp",
-                        &[("local", local.as_str()), ("upstream", upstream.as_str()),],
-                    ),
-                    pkg_w = pkg_w,
-                    stat_w = stat_w
-                ));
-                lines.push(i18n::tf(
-                    "manage.bulk_report_diff_heading",
-                    &[("id", id), ("diff", diff.as_str())],
-                ));
-            }
+            }) => append_bulk_diff_status(
+                &mut lines,
+                id,
+                "manage.bulk_report_status_outdated",
+                local,
+                upstream,
+                diff,
+                (pkg_w, stat_w),
+            ),
+            Ok(UpdateStatus::LocallyModified {
+                local,
+                upstream,
+                diff,
+            }) => append_bulk_diff_status(
+                &mut lines,
+                id,
+                "manage.bulk_report_status_local",
+                local,
+                upstream,
+                diff,
+                (pkg_w, stat_w),
+            ),
             Err(AdminError::NotImplemented(what)) => {
                 lines.push(format!(
                     "{:<pkg_w$} | {:<stat_w$} | {what}",
@@ -835,6 +937,22 @@ fn format_bulk_upstream_report(
     }
 
     lines.join("\n") + "\n"
+}
+
+fn present_upstream_diff(
+    parent: Option<&gtk4::Window>,
+    title_key: &str,
+    package: &str,
+    local: &str,
+    upstream: &str,
+    diff: &str,
+) {
+    let body = i18n::tf(
+        "manage.upstream_diff_body",
+        &[("local", local), ("upstream", upstream), ("diff", diff)],
+    );
+    let title = i18n::tf(title_key, &[("pkg", package)]);
+    present_monospace_report_window(parent, &title, &body, None);
 }
 
 fn render_admin_result(toasts: &ToastOverlay, res: Result<(), AdminError>, ok_msg: &str) {

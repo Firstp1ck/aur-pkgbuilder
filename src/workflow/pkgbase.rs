@@ -51,28 +51,36 @@ pub enum PkgbaseValidationError {
     InvalidCharset,
 }
 
-/// What: Returns `true` when `pacman -Si name` exits successfully.
-///
-/// Inputs:
-/// - `name`: trimmed pkgbase to probe.
-///
-/// Output:
-/// - `Ok(true)` when the name resolves in configured sync databases.
-/// - `Ok(false)` when pacman reports it is not a package (non-zero exit).
-///
-/// Details:
-/// - Discards stdout/stderr — callers only need presence, not version text.
+/// Return whether `pacman -Si` found the package, failing closed on operational errors.
 async fn official_repo_pkg_exists(name: &str) -> Result<bool, PkgbaseNsError> {
     let output = Command::new("pacman")
         .arg("-Si")
         .arg(name)
+        .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .output()
         .await
         .map_err(|e| PkgbaseNsError::Pacman(format!("could not run pacman -Si ({e})")))?;
-    Ok(output.status.success())
+    if output.status.success() {
+        return Ok(true);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if pacman_reports_target_not_found(&stderr, name) {
+        return Ok(false);
+    }
+    Err(PkgbaseNsError::Pacman(format!(
+        "pacman -Si exited {}: {}",
+        output.status,
+        stderr.trim()
+    )))
+}
+
+fn pacman_reports_target_not_found(stderr: &str, name: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("was not found")
+        && (lower.contains(&format!("'{name}'")) || lower.contains(name))
 }
 
 /// What: Parallel checks for AUR + official-repository pkgbase collisions.
@@ -172,5 +180,17 @@ mod tests {
             validate_aur_pkgbase_id("   "),
             Err(PkgbaseValidationError::Empty)
         );
+    }
+
+    #[test]
+    fn pacman_not_found_classifier_rejects_operational_errors() {
+        assert!(pacman_reports_target_not_found(
+            "error: package 'demo' was not found",
+            "demo"
+        ));
+        assert!(!pacman_reports_target_not_found(
+            "error: failed to synchronize all databases",
+            "demo"
+        ));
     }
 }

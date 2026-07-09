@@ -24,6 +24,10 @@ aur_ssh.section_voting_desc: Affect only your relationship to the package.
 aur_ssh.section_voting_title: Voting & notifications
 aur_ssh.subtitle: Talks to aur@aur.archlinux.org with the curated command set maintainers usually drive by hand. The selected
   SSH key is used automatically.
+aur_ssh.confirm_body: 'Run destructive command {cmd} for package {package}? This may change AUR ownership or repository state immediately.'
+aur_ssh.confirm_cancel: Cancel
+aur_ssh.confirm_run: Run destructive command
+aur_ssh.confirm_title: Confirm destructive AUR command
 aur_ssh.toast_enter_name: Enter a package name first.
 aur_ssh.toast_err: '{cmd}: {err}'
 aur_ssh.toast_exit: '{cmd}: exited {status}'
@@ -69,8 +73,10 @@ build.makepkg_exit: makepkg exited {status}
 build.option_clean: Clean build tree after success (--clean)
 build.option_nobuild: Prepare only (--nobuild)
 build.status_building: building…
+build.status_sources_prepared: sources prepared (no package was built)
 build.status_succeeded: build succeeded
 build.toast_done: Build finished
+build.toast_sources_prepared: Sources prepared; run a full build before publishing
 build.toast_error: Build error
 build.toast_failed: Build failed
 build.toast_no_pkg: Pick a package on the Home tab before building.
@@ -115,6 +121,7 @@ connection.toast_file_picker: Could not open file picker.
 connection.toast_folder_picker: Could not open folder picker.
 connection.toast_no_parent_window: Could not find a parent window for opening the path.
 connection.toast_open_path_failed: 'Could not open {path}: {err}'
+connection.toast_save_failed: 'Could not save connection settings: {error}'
 connection.tool_row.detail_hint: '{detail} — {hint}'
 connection.tool_row.missing: 'missing — install: {hint}'
 connection.tool_row.purpose_path: '{purpose} — using `{via}`'
@@ -277,7 +284,8 @@ manage.upstream_ok_toast: '{pkg}: on-disk PKGBUILD matches upstream (pkgver {ver
 manage.upstream_title_diff: Upstream check — review diffs
 manage.upstream_title_report: Upstream check — report
 manage.upstream_toast: One or more packages differ from upstream or failed — see the report window.
-manage.upstream_window_title: '{pkg} — PKGBUILD vs upstream'
+manage.upstream_window_title: '{pkg} — upstream PKGBUILD is newer'
+manage.upstream_local_window_title: '{pkg} — locally modified or ahead'
 manage.upstream_diff_body: |-
   pkgver: {local} (local) → {upstream} (upstream)
 
@@ -289,6 +297,7 @@ manage.bulk_report_col_status: Status
 manage.bulk_report_col_details: Details
 manage.bulk_report_status_up_to_date: up to date
 manage.bulk_report_status_outdated: outdated
+manage.bulk_report_status_local: local/ahead
 manage.bulk_report_status_preview: preview
 manage.bulk_report_status_error: error
 manage.bulk_report_pkgver: 'pkgver {version}'
@@ -326,6 +335,7 @@ onboarding.toast_fetch_failed: 'Fetch failed: {err}'
 onboarding.toast_found_n: Found {n} package(s)
 onboarding.toast_imported_n: Imported {n} package(s)
 onboarding.toast_no_packages: No packages found for this user
+onboarding.toast_save_failed: 'Could not save onboarding data: {err}'
 onboarding.toast_select_one: Select at least one package.
 onboarding.username_title: AUR username
 package.hint.bin_suffix: 'AUR convention: with Kind “binary”, the pkgbase usually ends with “-bin”. You can still save—this
@@ -376,6 +386,10 @@ package_editor.blurb_edit: Required fields are marked with *. Display title, sho
 pkgbuild_editor.banner_no_home_pkg: No package is selected on Home.
 pkgbuild_editor.btn_apply: Apply quick fields
 pkgbuild_editor.btn_reload: Reload
+pkgbuild_editor.reload_confirm_body: Reloading replaces the unsaved editor text with the PKGBUILD on disk.
+pkgbuild_editor.reload_confirm_cancel: Keep editing
+pkgbuild_editor.reload_confirm_discard: Discard and reload
+pkgbuild_editor.reload_confirm_title: Discard unsaved PKGBUILD edits?
 pkgbuild_editor.btn_save: Save
 pkgbuild_editor.btn_srcinfo: .SRCINFO
 pkgbuild_editor.diff_more_removed: … (more removed lines not shown)
@@ -692,6 +706,12 @@ ssh_setup.done_hint_connection: Re-run the SSH probe to confirm.
 ssh_setup.done_back_onboarding: Finish onboarding
 ssh_setup.done_hint_onboarding: Run the SSH test above (or on Connection) if publish still says SSH is unverified.
 ssh_setup.op_failed: 'Failed: {err}'
+ssh_probe.connected: connected
+ssh_probe.error: error
+ssh_probe.failed_exit: failed (exit {code})
+ssh_probe.key_rejected: key rejected
+ssh_probe.probing: probing…
+ssh_probe.save_failed: could not save SSH settings
 sync.browse: Browse…
 sync.choose_destination: Choose destination folder
 sync.dest_row_title: Destination directory
@@ -721,6 +741,7 @@ sync.section_publish_desc: Publish copies PKGBUILD and .SRCINFO from the destina
   when you choose. A successful push updates the public AUR immediately. On a brand-new pkgbase, the first clone may warn that
   the repository is empty—that is expected.
 sync.btn_download: Download PKGBUILD
+sync.btn_retry_probe: Retry source check
 sync.btn_continue: Continue
 sync.page_title: Sync PKGBUILD
 sync.status_saved_to: 'saved to {path}'

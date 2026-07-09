@@ -150,6 +150,27 @@ pub async fn spawn_ssh_agent_session() -> Result<SshAgentEnv, SshSetupError> {
     })
 }
 
+/// Stop an ssh-agent process that this application started.
+pub fn terminate_ssh_agent_session(session: &SshAgentEnv) -> Result<(), SshSetupError> {
+    let output = std::process::Command::new("ssh-agent")
+        .arg("-k")
+        .env("SSH_AUTH_SOCK", &session.ssh_auth_sock)
+        .env("SSH_AGENT_PID", session.ssh_agent_pid.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .with_context(|| "spawning ssh-agent -k")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(SshSetupError::Other(anyhow::anyhow!(
+        "ssh-agent -k exited {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
+}
+
 /// One detected key pair under `~/.ssh`.
 #[derive(Debug, Clone)]
 pub struct SshKey {
@@ -465,6 +486,7 @@ async fn ssh_add_private_key_env(
 ) -> Result<String, SshSetupError> {
     let mut cmd = Command::new("ssh-add");
     cmd.arg(private_key)
+        .env("SSH_ASKPASS_REQUIRE", "never")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -472,9 +494,13 @@ async fn ssh_add_private_key_env(
         cmd.env("SSH_AUTH_SOCK", &a.ssh_auth_sock);
         cmd.env("SSH_AGENT_PID", a.ssh_agent_pid.to_string());
     }
-    let output = cmd
-        .output()
+    let output = tokio::time::timeout(Duration::from_secs(15), cmd.output())
         .await
+        .map_err(|_| {
+            SshSetupError::Other(anyhow::anyhow!(
+                "ssh-add timed out after 15 seconds. Use an unencrypted key or load the key in a terminal so its passphrase can be entered safely."
+            ))
+        })?
         .with_context(|| format!("spawning ssh-add {}", private_key.display()))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -550,7 +576,13 @@ async fn ensure_aur_key_in_dir(
     let public_path = with_pub_extension(&private_path);
 
     if private_path.is_file() {
-        let contents = read_public_key(&public_path).await.unwrap_or_default();
+        fs::set_permissions(&private_path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .with_context(|| format!("setting permissions on {}", private_path.display()))?;
+        if !public_path.is_file() {
+            regenerate_public_key(&private_path, &public_path).await?;
+        }
+        let contents = read_public_key(&public_path).await?;
         let (algorithm, existing_comment) = parse_public_key_header(&contents);
         let fingerprint_sha256 = lf_fingerprint_pub_file(&public_path).await;
         return Ok((
@@ -607,11 +639,46 @@ async fn ensure_aur_key_in_dir(
     ))
 }
 
-/// Ensure `~/.ssh/known_hosts` has an entry for `aur.archlinux.org`.
-/// Runs `ssh-keygen -F` to check, then `ssh-keyscan` + append when missing.
+async fn regenerate_public_key(
+    private_path: &Path,
+    public_path: &Path,
+) -> Result<(), SshSetupError> {
+    let output = Command::new("ssh-keygen")
+        .arg("-y")
+        .arg("-f")
+        .arg(private_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| format!("spawning ssh-keygen -y for {}", private_path.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "could not regenerate {} from existing private key {}: {}",
+            public_path.display(),
+            private_path.display(),
+            stderr.trim()
+        )));
+    }
+    let mut key = output.stdout;
+    if !key.ends_with(b"\n") {
+        key.push(b'\n');
+    }
+    atomic_write_with_mode(public_path, &key, 0o644).await
+}
+
+/// Ensure `~/.ssh/known_hosts` has current verified entries for `aur.archlinux.org`.
 pub async fn ensure_known_hosts_entry() -> Result<KnownHostsState, SshSetupError> {
+    let trusted = trusted_aur_ssh_hostkey_sha256().await;
     if host_entry_exists(AUR_HOSTNAME).await? {
-        return Ok(KnownHostsState::AlreadyPresent);
+        let existing = existing_host_entries(AUR_HOSTNAME).await?;
+        let fingerprints = fingerprint_each(&existing).await;
+        if all_fingerprints_trusted(&fingerprints, &trusted) {
+            return Ok(KnownHostsState::AlreadyPresent);
+        }
+        remove_host_entries(AUR_HOSTNAME).await?;
     }
 
     let scanned = ssh_keyscan(AUR_HOSTNAME).await?;
@@ -621,7 +688,6 @@ pub async fn ensure_known_hosts_entry() -> Result<KnownHostsState, SshSetupError
         )));
     }
 
-    let trusted = trusted_aur_ssh_hostkey_sha256().await;
     verify_keyscan_matches_trusted(&scanned, &trusted).await?;
 
     let dir = ssh_dir()?;
@@ -673,10 +739,7 @@ pub async fn write_ssh_config_entry(key: &Path) -> Result<ConfigState, SshSetupE
         return Ok(ConfigState::Unchanged);
     }
 
-    fs::write(&path, updated)
-        .await
-        .with_context(|| format!("writing {}", path.display()))?;
-    let _ = fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await;
+    atomic_write_with_mode(&path, updated.as_bytes(), 0o600).await?;
     Ok(state)
 }
 
@@ -727,6 +790,46 @@ async fn ends_with_newline(path: &Path) -> Result<bool, SshSetupError> {
     Ok(data.last().copied() == Some(b'\n'))
 }
 
+async fn atomic_write_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Result<(), SshSetupError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{} has no parent directory", path.display()))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = parent.join(format!(
+        ".aur-pkgbuilder.{}.{stamp}.tmp",
+        std::process::id()
+    ));
+    let result = async {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+            .await
+            .with_context(|| format!("creating {}", tmp.display()))?;
+        file.write_all(bytes)
+            .await
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        file.sync_all()
+            .await
+            .with_context(|| format!("syncing {}", tmp.display()))?;
+        drop(file);
+        fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
+            .await
+            .with_context(|| format!("setting permissions on {}", tmp.display()))?;
+        fs::rename(&tmp, path)
+            .await
+            .with_context(|| format!("replacing {}", path.display()))
+    }
+    .await;
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp).await;
+    }
+    result.map_err(SshSetupError::Other)
+}
+
 // ---------------------------------------------------------------------------
 // known_hosts
 // ---------------------------------------------------------------------------
@@ -744,6 +847,49 @@ async fn host_entry_exists(host: &str) -> Result<bool, SshSetupError> {
     Ok(status.success())
 }
 
+async fn existing_host_entries(host: &str) -> Result<String, SshSetupError> {
+    let output = Command::new("ssh-keygen")
+        .arg("-F")
+        .arg(host)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| "spawning ssh-keygen -F")?;
+    if !output.status.success() {
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "ssh-keygen -F {host} exited {}",
+            output.status
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+async fn remove_host_entries(host: &str) -> Result<(), SshSetupError> {
+    let path = ssh_dir()?.join("known_hosts");
+    let output = Command::new("ssh-keygen")
+        .arg("-R")
+        .arg(host)
+        .arg("-f")
+        .arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .with_context(|| format!("spawning ssh-keygen -R {host}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(SshSetupError::Other(anyhow::anyhow!(
+            "could not remove stale {host} entries from {}: {}",
+            path.display(),
+            stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
 /// What: Decide whether every fingerprint found in `known_hosts` is trusted.
 ///
 /// Inputs:
@@ -753,7 +899,7 @@ async fn host_entry_exists(host: &str) -> Result<bool, SshSetupError> {
 /// Output:
 /// - `true` only when the existing entries need no refresh.
 fn all_fingerprints_trusted(found: &[String], trusted: &[String]) -> bool {
-    found.iter().all(|f| trusted.contains(f))
+    !found.is_empty() && found.iter().all(|f| trusted.contains(f))
 }
 
 async fn ssh_keyscan(host: &str) -> Result<String, SshSetupError> {
@@ -785,7 +931,9 @@ async fn fingerprint_each(keys: &str) -> Vec<String> {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if let Ok(fp) = fingerprint_of(trimmed).await {
+        if let Ok(line) = fingerprint_of(trimmed).await
+            && let Some(fp) = sha256_token_from_keygen_lf_line(&line)
+        {
             out.push(fp);
         }
     }

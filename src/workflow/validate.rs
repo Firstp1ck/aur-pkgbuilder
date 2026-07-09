@@ -169,29 +169,16 @@ pub async fn run_tier(
     out
 }
 
-/// What: Runs a tier while discarding streamed log lines.
-///
-/// Inputs:
-/// - `tier`: which checks to run.
-/// - `package_dir`: directory containing `PKGBUILD`.
-///
-/// Output:
-/// - The same [`CheckReport`] list as [`run_tier`], suitable for summary badges.
-///
-/// Details:
-/// - Used for tab-header status probes where UI log output is unnecessary.
-pub async fn run_tier_silent(tier: CheckTier, package_dir: &Path) -> Vec<CheckReport> {
-    let (tx, rx) = async_channel::unbounded::<LogLine>();
-    let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
-    let reports = run_tier(tier, package_dir, &tx).await;
-    drop(tx);
-    let _ = drain.await;
-    reports
-}
-
 /// True when every required-tier outcome is [`CheckOutcome::Pass`].
 pub fn required_tier_all_pass(reports: &[CheckReport]) -> bool {
-    !reports.is_empty() && reports.iter().all(|r| r.outcome == CheckOutcome::Pass)
+    let required: Vec<&CheckReport> = reports
+        .iter()
+        .filter(|report| report.id.tier() == CheckTier::Required)
+        .collect();
+    !required.is_empty()
+        && required
+            .iter()
+            .all(|report| report.outcome == CheckOutcome::Pass)
 }
 
 /// Run the fast tiers (required + optional). Extended checks are **not**
@@ -476,15 +463,7 @@ async fn run_capture(
 }
 
 async fn is_available(program: &str) -> bool {
-    Command::new("which")
-        .arg(program)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
+    super::preflight::find_executable_in_path(program).is_some()
 }
 
 /// Return the most recently-modified `.pkg.tar.*` file in `dir`, or `None`.
@@ -571,5 +550,37 @@ mod tab_summary_tests {
         let mut bad = ok.clone();
         bad[1].outcome = CheckOutcome::Fail;
         assert!(!required_tier_all_pass(&bad));
+    }
+
+    #[test]
+    fn required_tier_ignores_optional_warns_and_skips() {
+        let reports = [
+            CheckReport {
+                id: CheckId::BashSyntax,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::PrintSrcinfo,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::VerifySource,
+                outcome: CheckOutcome::Pass,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::ShellCheck,
+                outcome: CheckOutcome::Skipped,
+                summary: String::new(),
+            },
+            CheckReport {
+                id: CheckId::Namcap,
+                outcome: CheckOutcome::Warn,
+                summary: String::new(),
+            },
+        ];
+        assert!(required_tier_all_pass(&reports));
     }
 }

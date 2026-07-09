@@ -10,6 +10,83 @@ Categories: `reliability` (crashes, hangs, data loss), `robustness` (edge
 cases, silent failures, invariant violations), `UX` (feedback, confirmation,
 clarity).
 
+## Implementation progress
+
+Status audit updated 2026-07-09. All 56 findings now have implementations in
+the current worktree; the table points to the primary implementation evidence.
+The final full verification sequence is tracked below the table.
+
+| # | Status | Primary implementation evidence |
+|---:|:---:|---|
+| 1 | ✅ Implemented | `Config::load` / `Registry::load` now return errors, preserve `.broken-*` copies, show a startup dialog, and refuse destructive saves. |
+| 2 | ✅ Implemented | Atomic same-directory temp-write + rename is used by config, registry, PKGBUILD download, and SSH config writers. |
+| 3 | ✅ Implemented | `required_tier_all_pass` filters to `CheckTier::Required`; optional warn/skip coverage was added. |
+| 4 | ✅ Implemented | `strip_outer_quotes` requires at least two bytes; lone-quote regression tests pass. |
+| 5 | ✅ Implemented | `run_updpkgsums` restores only when the complete PKGBUILD differs solely by whitespace. |
+| 6 | ✅ Implemented | Publish Stage and Push share mutual button exclusion while either operation is active. |
+| 7 | ✅ Implemented | `refresh_version_tab_page` drops the `tab_pages` mutable borrow before refresh helpers run. |
+| 8 | ✅ Implemented | Sync and AUR RPC clients use total and connect timeouts. |
+| 9 | ✅ Implemented | `ssh-add` uses `SSH_ASKPASS_REQUIRE=never` and a 15-second timeout with actionable failure text. |
+| 10 | ✅ Implemented | Git-over-SSH commands use batch mode, strict host checking, connect timeout, and a 120-second process timeout. |
+| 11 | ✅ Implemented | App-owned `ssh-agent` sessions are terminated during window shutdown. |
+| 12 | ✅ Implemented | The preflight probe now uses `StrictHostKeyChecking=yes`; trust remains in the fingerprint-verified setup flow. |
+| 13 | ✅ Implemented | SSH config host/match parsing is case-insensitive and supports alias pattern lists. |
+| 14 | ✅ Implemented | Existing known-host entries are fingerprinted; stale/untrusted entries are removed and replaced only after verification. |
+| 15 | ✅ Implemented | Commit gating uses `git diff --cached --quiet`; unrelated untracked build artefacts no longer trigger an empty commit. |
+| 16 | ✅ Implemented | Imported split packages retain `PackageBase` and use it for the cgit PKGBUILD URL. |
+| 17 | ✅ Implemented | Downloads reject non-text/HTML bodies before an atomic PKGBUILD replacement. |
+| 18 | ✅ Implemented | Tool lookup scans `PATH` with `split_paths` and no longer depends on `which`. |
+| 19 | ✅ Implemented | Runtime helpers catch panics/channel loss and always deliver a typed fallback completion to UI callbacks. |
+| 20 | ✅ Implemented | A changed `updpkgsums` result refreshes the Version page/editor from disk. |
+| 21 | ✅ Implemented | Publish operations set an in-flight state that prevents periodic SSH probes from rebuilding their page. |
+| 22 | ✅ Implemented | Validation tier buttons share a busy set and are restored only after completion. |
+| 23 | ✅ Implemented | Validate construction and tab badges no longer auto-run network-capable required checks. |
+| 24 | ✅ Implemented | Package-editor cancel/close sets a cancellation flag checked by the async namespace callback. |
+| 25 | ✅ Implemented | Removing the selected package clears both live selection and `last_package`. |
+| 26 | ✅ Implemented | Per-row removal now requires a destructive confirmation dialog. |
+| 27 | ✅ Implemented | Destructive AUR SSH commands require a package/command confirmation dialog. |
+| 28 | ✅ Implemented | Dirty Version editor state blocks tab rebuilds and Reload requires explicit discard confirmation. |
+| 29 | ✅ Implemented | `refresh_manage_tab_page` is called by registry mutation paths. |
+| 30 | ✅ Implemented | Check-all disables its button and displays a spinner until completion. |
+| 31 | ✅ Implemented | Sync exposes a retry source-check action after transient probe failures. |
+| 32 | ✅ Implemented | Previously discarded config/registry save errors now reach toasts/dialogs; refresh timestamp helpers return `Result`. |
+| 33 | ✅ Implemented | JSONC headers now honestly state that GUI saves replace user comments/notes. |
+| 34 | ✅ Implemented | `LogView` reuses one end mark and caps the transcript at 10,000 lines. |
+| 35 | ✅ Implemented | Upstream classification compares epoch/pkgver/pkgrel and distinguishes local/ahead modifications from outdated packages. |
+| 36 | ✅ Implemented | Spawn contexts name the missing tool and include exact Arch install hints for `makepkg`/`updpkgsums`. |
+| 37 | ✅ Implemented | Work directories are opened with main-thread `GtkFileLauncher`, not worker-thread `xdg-open`. |
+| 38 | ✅ Implemented | Remote probes clone under `<work_dir>/aur/.probe-*` and cleanup failures are non-fatal. |
+| 39 | ✅ Implemented | A missing `aur.pub` is regenerated with `ssh-keygen -y` without rewriting the private key. |
+| 40 | ✅ Implemented | One-click setup surfaces every newly trusted host-key fingerprint. |
+| 41 | ✅ Implemented | One-click SSH setup now shows a spinner throughout the operation. |
+| 42 | ✅ Implemented | All AUR SSH Run buttons share one busy state, preventing concurrent log-clearing commands. |
+| 43 | ✅ Implemented | SSH probe status text is routed through English/German i18n keys. |
+| 44 | ✅ Implemented | `--nobuild` reports “sources prepared” and does not unlock Publish. |
+| 45 | ✅ Implemented | Serde field defaults for `work_dir` and `ssh_key` use the documented default functions. |
+| 46 | ✅ Implemented | Log colors select light/dark semantic palettes instead of one dark-only palette. |
+| 47 | ✅ Implemented | Onboarding persists the username only after a successful RPC response and surfaces save failures. |
+| 48 | ✅ Implemented | Connection path entries save on focus-out as well as browse/probe/continue. |
+| 49 | ✅ Implemented | Starter-PKGBUILD creation disables its button until the async callback completes. |
+| 50 | ✅ Implemented | Favorite popovers unparent on row unrealize before list disposal. |
+| 51 | ✅ Implemented | PKGBUILD Save records the click-time text snapshot as the baseline. |
+| 52 | ✅ Implemented | Reused AUR clones fail closed unless origin and current branch match; pushes target `HEAD:master`. |
+| 53 | ✅ Implemented | Staging recursively copies non-artifact maintainer files, removes stale tracked files, and stages the deliberate tree. |
+| 54 | ✅ Implemented | Generated `.gitignore` no longer ignores itself; helper-file commit coverage includes `.gitignore`. |
+| 55 | ✅ Implemented | Unborn clones use status-based preview/change detection and can create the initial commit. |
+| 56 | ✅ Implemented | `pacman -Si` runs with `LC_ALL=C`; only the known “was not found” result means the name is free. |
+
+**Progress:** 56/56 implemented and verified.
+
+Final verification (2026-07-09):
+- `cargo fmt --all` — passed
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed
+- `cargo check` — passed
+- `cargo test --bin aur-pkgbuilder` — passed (126 tests)
+- `cargo deny check` — passed (allowlist entries not currently encountered remain warnings)
+
+`Cargo.lock` was updated from `anyhow` 1.0.102 to 1.0.103 so the final
+advisory check clears RUSTSEC-2026-0190.
+
 ---
 
 ## High severity

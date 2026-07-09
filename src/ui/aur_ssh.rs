@@ -4,8 +4,12 @@
 //! its own **Run** button. Output is streamed into a shared log pane.
 //! Destructive commands (adopt, disown, setup-repo) are visually tagged.
 
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
+
 use adw::prelude::*;
-use adw::{ActionRow, EntryRow, NavigationPage, NavigationView, Toast, ToastOverlay};
+use adw::{ActionRow, AlertDialog, EntryRow, NavigationPage, NavigationView, Toast, ToastOverlay};
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
 use crate::i18n;
@@ -88,9 +92,10 @@ pub fn build(nav: &NavigationView, state: &AppStateRef) -> NavigationPage {
         i18n::t("aur_ssh.log_title"),
         i18n::t("aur_ssh.log_subtitle"),
     );
+    let run_buttons: Rc<RefCell<Vec<Button>>> = Rc::new(RefCell::new(Vec::new()));
 
     for cmd in AurSshCommand::ALL {
-        let row = render_command_row(cmd, state, &pkg_row, &args_row, &log, &toasts);
+        let row = render_command_row(cmd, state, &pkg_row, &args_row, &log, &toasts, &run_buttons);
         match cmd {
             AurSshCommand::Help | AurSshCommand::ListRepos => account_exp.add_row(&row),
             AurSshCommand::Vote
@@ -126,6 +131,7 @@ fn render_command_row(
     args_row: &EntryRow,
     log: &LogView,
     toasts: &ToastOverlay,
+    run_buttons: &Rc<RefCell<Vec<Button>>>,
 ) -> ActionRow {
     let row = ActionRow::builder()
         .title(cmd.title())
@@ -154,20 +160,19 @@ fn render_command_row(
         ])
         .build();
     row.add_suffix(&run_btn);
+    run_buttons.borrow_mut().push(run_btn.clone());
 
     let state = state.clone();
     let pkg_row = pkg_row.clone();
     let args_row = args_row.clone();
     let log = log.clone();
     let toasts = toasts.clone();
+    let run_buttons = run_buttons.clone();
     run_btn.connect_clicked(move |btn| {
-        btn.set_sensitive(false);
-        log.clear();
         let package = if cmd.needs_package() {
             let pkg = pkg_row.text().trim().to_string();
             if pkg.is_empty() {
                 toasts.add_toast(Toast::new(&i18n::t("aur_ssh.toast_enter_name")));
-                btn.set_sensitive(true);
                 return;
             }
             Some(pkg)
@@ -176,50 +181,100 @@ fn render_command_row(
         };
         let extra = args_row.text().to_string();
         let key = state.borrow().config.ssh_key.clone();
-        let btn_cb = btn.clone();
-        let toasts_cb = toasts.clone();
-        runtime::spawn_streaming(
-            {
-                let log_cb = log.clone();
-                move |tx| async move {
-                    let _ = log_cb;
-                    aur_ssh::run(cmd, package.as_deref(), &extra, key.as_deref(), &tx).await
-                }
-            },
-            {
-                let log = log.clone();
-                move |line| log.append(&line)
-            },
-            move |res| {
-                btn_cb.set_sensitive(true);
-                match res {
-                    Ok(status) if status.success() => {
-                        let c = cmd.cmd();
-                        toasts_cb
-                            .add_toast(Toast::new(&i18n::tf("aur_ssh.toast_ok", &[("cmd", c)])));
+        if cmd.severity() == Severity::Destructive {
+            let Some(parent) = btn.root().and_downcast::<gtk4::Window>() else {
+                return;
+            };
+            let package_label = package.as_deref().unwrap_or("—");
+            let body = i18n::tf(
+                "aur_ssh.confirm_body",
+                &[("cmd", cmd.cmd()), ("package", package_label)],
+            );
+            let dialog = AlertDialog::new(Some(&i18n::t("aur_ssh.confirm_title")), Some(&body));
+            let cancel = i18n::t("aur_ssh.confirm_cancel");
+            let run = i18n::t("aur_ssh.confirm_run");
+            dialog.add_responses(&[("cancel", &cancel), ("run", &run)]);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_response_appearance("run", adw::ResponseAppearance::Destructive);
+            let log = log.clone();
+            let toasts = toasts.clone();
+            let run_buttons = run_buttons.clone();
+            dialog.choose(
+                Some(&parent),
+                Option::<&gtk4::gio::Cancellable>::None,
+                move |response| {
+                    if response.as_str() == "run" {
+                        start_aur_ssh_command(cmd, package, extra, key, log, toasts, run_buttons);
                     }
-                    Ok(status) => {
-                        let c = cmd.cmd();
-                        let st = status.to_string();
-                        toasts_cb.add_toast(Toast::new(&i18n::tf(
-                            "aur_ssh.toast_exit",
-                            &[("cmd", c), ("status", st.as_str())],
-                        )));
-                    }
-                    Err(e) => {
-                        let c = cmd.cmd();
-                        let err = e.to_string();
-                        toasts_cb.add_toast(Toast::new(&i18n::tf(
-                            "aur_ssh.toast_err",
-                            &[("cmd", c), ("err", err.as_str())],
-                        )));
-                    }
-                }
-            },
-        );
+                },
+            );
+        } else {
+            start_aur_ssh_command(
+                cmd,
+                package,
+                extra,
+                key,
+                log.clone(),
+                toasts.clone(),
+                run_buttons.clone(),
+            );
+        }
     });
 
     row
+}
+
+fn start_aur_ssh_command(
+    cmd: AurSshCommand,
+    package: Option<String>,
+    extra: String,
+    key: Option<PathBuf>,
+    log: LogView,
+    toasts: ToastOverlay,
+    run_buttons: Rc<RefCell<Vec<Button>>>,
+) {
+    for button in run_buttons.borrow().iter() {
+        button.set_sensitive(false);
+    }
+    log.clear();
+    let buttons_done = run_buttons.clone();
+    let toasts_done = toasts.clone();
+    runtime::spawn_streaming(
+        move |tx| async move {
+            aur_ssh::run(cmd, package.as_deref(), &extra, key.as_deref(), &tx).await
+        },
+        {
+            let log = log.clone();
+            move |line| log.append(&line)
+        },
+        move |res| {
+            for button in buttons_done.borrow().iter() {
+                button.set_sensitive(true);
+            }
+            match res {
+                Ok(status) if status.success() => {
+                    toasts_done.add_toast(Toast::new(&i18n::tf(
+                        "aur_ssh.toast_ok",
+                        &[("cmd", cmd.cmd())],
+                    )));
+                }
+                Ok(status) => {
+                    let status = status.to_string();
+                    toasts_done.add_toast(Toast::new(&i18n::tf(
+                        "aur_ssh.toast_exit",
+                        &[("cmd", cmd.cmd()), ("status", status.as_str())],
+                    )));
+                }
+                Err(error) => {
+                    let error = error.to_string();
+                    toasts_done.add_toast(Toast::new(&i18n::tf(
+                        "aur_ssh.toast_err",
+                        &[("cmd", cmd.cmd()), ("err", error.as_str())],
+                    )));
+                }
+            }
+        },
+    );
 }
 
 fn badge(text: &str, css: &str) -> Label {

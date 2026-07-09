@@ -1,11 +1,12 @@
 use std::cell::Cell;
+use std::rc::Rc;
 
 use gtk4::gdk;
 use gtk4::pango;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer, TextTag,
-    TextView, WrapMode,
+    Align, Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer, TextMark,
+    TextTag, TextView, WrapMode,
 };
 
 use crate::i18n;
@@ -33,7 +34,8 @@ pub struct LogView {
     tag_stderr: TextTag,
     tag_info: TextTag,
     tag_placeholder: TextTag,
-    has_content: Cell<bool>,
+    end_mark: TextMark,
+    has_content: Rc<Cell<bool>>,
 }
 
 impl LogView {
@@ -51,14 +53,17 @@ impl LogView {
     ///   empty pane still reads as a dedicated output surface.
     pub fn new(title: impl Into<String>, hint: impl Into<String>) -> Self {
         let buffer = TextBuffer::new(None);
+        let dark = adw::StyleManager::default().is_dark();
+        let info_color = if dark { "#8ab4f8" } else { "#0b57d0" };
+        let stderr_color = if dark { "#f28b82" } else { "#b3261e" };
         let tag_info = TextTag::builder()
             .name("info")
-            .foreground("#8ab4f8")
+            .foreground(info_color)
             .weight(600)
             .build();
         let tag_stderr = TextTag::builder()
             .name("stderr")
-            .foreground("#f28b82")
+            .foreground(stderr_color)
             .build();
         let placeholder_fg =
             gdk::RGBA::parse("#787878").unwrap_or_else(|_| gdk::RGBA::new(0.47, 0.47, 0.47, 1.0));
@@ -117,6 +122,7 @@ impl LogView {
         root.append(&hint_l);
         root.append(&scroller);
 
+        let end_mark = buffer.create_mark(Some("log-end"), &buffer.end_iter(), false);
         let slf = Self {
             root,
             scroller,
@@ -124,7 +130,8 @@ impl LogView {
             tag_stderr,
             tag_info,
             tag_placeholder,
-            has_content: Cell::new(false),
+            end_mark,
+            has_content: Rc::new(Cell::new(false)),
         };
         slf.insert_placeholder();
         slf
@@ -151,6 +158,8 @@ impl LogView {
         self.buffer.delete(&mut start.clone(), &mut end.clone());
         self.has_content.set(false);
         self.insert_placeholder();
+        self.buffer
+            .move_mark(&self.end_mark, &self.buffer.end_iter());
         self.scroll_start();
     }
 
@@ -175,13 +184,27 @@ impl LogView {
         }
         let mut end = self.buffer.end_iter();
         self.buffer.insert(&mut end, "\n");
-
-        let mark = self
-            .buffer
-            .create_mark(None, &self.buffer.end_iter(), false);
+        self.trim_old_lines();
+        self.buffer
+            .move_mark(&self.end_mark, &self.buffer.end_iter());
         if let Some(view) = self.scroller.child().and_downcast::<TextView>() {
-            view.scroll_to_mark(&mark, 0.0, false, 0.0, 0.0);
+            view.scroll_to_mark(&self.end_mark, 0.0, false, 0.0, 0.0);
         }
+    }
+
+    fn trim_old_lines(&self) {
+        const MAX_LINES: i32 = 10_000;
+        const TRIM_TO_LINES: i32 = 9_000;
+        let line_count = self.buffer.line_count();
+        if line_count <= MAX_LINES {
+            return;
+        }
+        let remove_lines = line_count - TRIM_TO_LINES;
+        let Some(mut cut) = self.buffer.iter_at_line(remove_lines) else {
+            return;
+        };
+        let mut start = self.buffer.start_iter();
+        self.buffer.delete(&mut start, &mut cut);
     }
 
     fn insert_placeholder(&self) {

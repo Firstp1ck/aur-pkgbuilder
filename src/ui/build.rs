@@ -102,7 +102,8 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             build_btn_inner.set_sensitive(false);
 
             let mut extra: Vec<String> = Vec::new();
-            if nobuild.is_active() {
+            let nobuild_requested = nobuild.is_active();
+            if nobuild_requested {
                 extra.push("--nobuild".into());
             }
             if clean.is_active() {
@@ -129,6 +130,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     spinner_done.stop();
                     build_btn_done.set_sensitive(true);
                     match res {
+                        Ok(status) if status.success() && nobuild_requested => {
+                            status_done.set_text(&i18n::t("build.status_sources_prepared"));
+                            continue_btn_done.set_sensitive(false);
+                            toasts_done
+                                .add_toast(Toast::new(&i18n::t("build.toast_sources_prepared")));
+                        }
                         Ok(status) if status.success() => {
                             status_done.set_text(&i18n::t("build.status_succeeded"));
                             continue_btn_done.set_sensitive(true);

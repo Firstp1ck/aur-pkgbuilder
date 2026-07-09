@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::workflow::package::PackageDef;
 
 use adw::prelude::*;
-use adw::{ActionRow, Banner, EntryRow, ExpanderRow, Toast, ToastOverlay};
+use adw::{ActionRow, AlertDialog, Banner, EntryRow, ExpanderRow, Toast, ToastOverlay};
 use glib::ControlFlow;
 use glib::source::{SourceId, timeout_add_local_once};
 use gtk4::ListBox;
@@ -208,6 +208,7 @@ impl EditorState {
         PkgbuildQuickFields {
             maintainer_comment: t(&self.maintainer),
             pkgname: t(&self.pkgname),
+            epoch: None,
             pkgver: t(&self.pkgver),
             pkgrel: t(&self.pkgrel),
             pkgdesc: t(&self.pkgdesc),
@@ -227,6 +228,10 @@ impl EditorState {
         let start = self.buffer.start_iter();
         let end = self.buffer.end_iter();
         self.buffer.text(&start, &end, false).to_string()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.full_text() != *self.baseline.borrow()
     }
 
     /// Replace buffer text and refresh the diff baseline (after load / initial template).
@@ -531,6 +536,16 @@ pub fn build_section(
 
     let st = EditorState::new(&pkg, diff_removed_bar.clone(), diff_removed_buf);
     st.bind_diff_refresh();
+    if matches!(pkg_source, PkgbuildEditorPkgSource::SelectedPackage) {
+        state.borrow_mut().pkgbuild_editor_dirty = false;
+        let state_dirty = state.clone();
+        let st_dirty = st.clone();
+        st.buffer.connect_changed(move |_| {
+            if !st_dirty.diff_inhibit.get() {
+                state_dirty.borrow_mut().pkgbuild_editor_dirty = st_dirty.is_dirty();
+            }
+        });
+    }
 
     let expander = ExpanderRow::builder()
         .title(i18n::t("pkgbuild_editor.quick_title"))
@@ -595,7 +610,36 @@ pub fn build_section(
     let st_reload = st.clone();
     let stale_reload = stale_banner.clone();
     let pkg_source_reload = pkg_source.clone();
-    reload.connect_clicked(move |_| {
+    let reload_confirmed = Rc::new(Cell::new(false));
+    let reload_button = reload.clone();
+    reload.connect_clicked(move |button| {
+        if st_reload.is_dirty() && !reload_confirmed.replace(false) {
+            let Some(parent) = button.root().and_downcast::<Window>() else {
+                return;
+            };
+            let dialog = AlertDialog::new(
+                Some(&i18n::t("pkgbuild_editor.reload_confirm_title")),
+                Some(&i18n::t("pkgbuild_editor.reload_confirm_body")),
+            );
+            let cancel = i18n::t("pkgbuild_editor.reload_confirm_cancel");
+            let discard = i18n::t("pkgbuild_editor.reload_confirm_discard");
+            dialog.add_responses(&[("cancel", &cancel), ("discard", &discard)]);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+            let reload_button = reload_button.clone();
+            let reload_confirmed = reload_confirmed.clone();
+            dialog.choose(
+                Some(&parent),
+                Option::<&gtk4::gio::Cancellable>::None,
+                move |response| {
+                    if response.as_str() == "discard" {
+                        reload_confirmed.set(true);
+                        reload_button.emit_clicked();
+                    }
+                },
+            );
+            return;
+        }
         let stale_for_cb = stale_reload.clone();
         let Some(pkg) = resolve_editor_pkg(&pkg_source_reload, &state_r) else {
             toasts_r.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_no_pkg")));
@@ -619,15 +663,30 @@ pub fn build_section(
                     st.populate_quick(&pkgbuild_edit::parse_quick_fields(&s));
                     match &pkg_source_cb {
                         PkgbuildEditorPkgSource::SelectedPackage => {
-                            crate::workflow::package::record_pkgbuild_refresh(&state_cb);
+                            state_cb.borrow_mut().pkgbuild_editor_dirty = false;
+                            if let Err(error) =
+                                crate::workflow::package::record_pkgbuild_refresh(&state_cb)
+                            {
+                                toasts.add_toast(Toast::new(&i18n::tf(
+                                    "sync.toast_registry_save",
+                                    &[("e", error.to_string().as_str())],
+                                )));
+                            }
                             if let Some(p) = state_cb.borrow().package.as_ref() {
                                 pkgbuild_stale::banner_set_pkgbuild_stale(&stale_for_cb, p);
                             }
                         }
                         PkgbuildEditorPkgSource::RegisterWizard { pkg: cell, .. } => {
-                            crate::workflow::package::record_pkgbuild_refresh_by_id(
-                                &state_cb, &pkg.id,
-                            );
+                            if let Err(error) =
+                                crate::workflow::package::record_pkgbuild_refresh_by_id(
+                                    &state_cb, &pkg.id,
+                                )
+                            {
+                                toasts.add_toast(Toast::new(&i18n::tf(
+                                    "sync.toast_registry_save",
+                                    &[("e", error.to_string().as_str())],
+                                )));
+                            }
                             if let Some(p) = state_cb
                                 .borrow()
                                 .registry
@@ -667,6 +726,7 @@ pub fn build_section(
             return;
         };
         let text = st_save.full_text();
+        let written_text = text.clone();
         let st = st_save.clone();
         let toasts = toasts_s.clone();
         let state_cb = state_s.clone();
@@ -676,8 +736,11 @@ pub fn build_section(
             async move { pkgbuild_edit::write_pkgbuild(&dir, &text).await },
             move |res| match res {
                 Ok(()) => {
-                    st.baseline.replace(st.full_text());
+                    st.baseline.replace(written_text.clone());
                     st.run_line_diff_highlights();
+                    if matches!(pkg_source_done, PkgbuildEditorPkgSource::SelectedPackage) {
+                        state_cb.borrow_mut().pkgbuild_editor_dirty = st.is_dirty();
+                    }
                     invoke_register_save_hook(&pkg_source_done);
                     shell_cb.notify_pkgbuild_saved(&state_cb);
                     toasts.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_saved")));
@@ -692,10 +755,15 @@ pub fn build_section(
 
     let toasts_a = toasts.clone();
     let st_apply = st.clone();
+    let state_apply = state.clone();
+    let pkg_source_apply = pkg_source.clone();
     apply.connect_clicked(move |_| {
         let merged =
             pkgbuild_edit::merge_quick_fields(&st_apply.full_text(), &st_apply.collect_quick());
         st_apply.replace_buffer_preserving_baseline(&merged);
+        if matches!(pkg_source_apply, PkgbuildEditorPkgSource::SelectedPackage) {
+            state_apply.borrow_mut().pkgbuild_editor_dirty = st_apply.is_dirty();
+        }
         toasts_a.add_toast(Toast::new(&i18n::t("pkgbuild_editor.toast_merge_quick")));
     });
 

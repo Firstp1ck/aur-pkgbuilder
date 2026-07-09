@@ -23,7 +23,6 @@ use crate::workflow::package::PackageDef;
 use crate::workflow::pkgbuild_edit;
 use crate::workflow::preflight;
 use crate::workflow::sync;
-use crate::workflow::validate::{self, CheckTier};
 
 /// Primary maintainer areas exposed as top tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -276,6 +275,9 @@ impl MainShell {
 
     /// Rebuild the Version tab so PKGBUILD staleness UI matches the registry after Sync.
     pub fn refresh_version_tab_page(&self, state: &AppStateRef) {
+        if state.borrow().pkgbuild_editor_dirty {
+            return;
+        }
         let idx = ProcessTab::Version as usize;
         let old_tp = {
             let pages = self.inner.tab_pages.borrow();
@@ -297,16 +299,46 @@ impl MainShell {
         let new_tp = self.inner.tab_view.insert(&new_page, idx as i32);
         let title = version_tab_title(&self.inner.pkgver_tab_cache.borrow());
         new_tp.set_title(&title);
-        let mut pages = self.inner.tab_pages.borrow_mut();
-        if pages.len() == ProcessTab::COUNT {
-            pages[idx] = new_tp;
+        {
+            let mut pages = self.inner.tab_pages.borrow_mut();
+            if pages.len() == ProcessTab::COUNT {
+                pages[idx] = new_tp;
+            }
         }
         self.spawn_pkgver_tab_refresh(state);
         self.spawn_validate_badge_refresh(state);
     }
 
+    /// Rebuild the Manage tab after registry mutations so its package rows stay current.
+    pub fn refresh_manage_tab_page(&self, state: &AppStateRef) {
+        let idx = ProcessTab::Manage as usize;
+        let old_tp = {
+            let pages = self.inner.tab_pages.borrow();
+            if pages.len() != ProcessTab::COUNT {
+                return;
+            }
+            pages.get(idx).cloned()
+        };
+        let Some(old_tp) = old_tp else {
+            return;
+        };
+
+        let new_page = crate::ui::manage::build(self, state);
+        let _allow_close = AllowProgrammaticTabClose::new(&self.inner.allow_programmatic_tab_close);
+        self.inner.tab_view.close_page(&old_tp);
+        let new_tp = self.inner.tab_view.insert(&new_page, idx as i32);
+        new_tp.set_title(&i18n::t("shell.tab.manage"));
+        let mut pages = self.inner.tab_pages.borrow_mut();
+        if pages.len() == ProcessTab::COUNT {
+            pages[idx] = new_tp;
+        }
+    }
+
     /// Rebuild the Publish tab so it picks up the current [`AppState::ssh_ok`] (see `publish` UI).
     pub fn refresh_publish_tab_page(&self, state: &AppStateRef) {
+        if state.borrow().publish_operation_active {
+            return;
+        }
         let idx = ProcessTab::Publish as usize;
         let old_tp = {
             let pages = self.inner.tab_pages.borrow();
@@ -333,7 +365,10 @@ impl MainShell {
         }
     }
 
-    /// Run required validation tier for the Validate tab indicator (no log view).
+    /// Reset the Validate indicator without running network-capable checks automatically.
+    ///
+    /// Validation is user-triggered from the Validate page; selecting a package must not
+    /// launch `makepkg --verifysource` or download sources in the background.
     pub fn spawn_validate_badge_refresh(&self, state: &AppStateRef) {
         let pkg = state.borrow().package.clone();
         let work = state.borrow().config.work_dir.clone();
@@ -345,16 +380,11 @@ impl MainShell {
             self.apply_validate_tab_icon(Some(false));
             return;
         };
-        let shell = self.clone();
-        runtime::spawn(
-            async move {
-                let reports = validate::run_tier_silent(CheckTier::Required, &dir).await;
-                validate::required_tier_all_pass(&reports)
-            },
-            move |ok| {
-                shell.apply_validate_tab_icon(Some(ok));
-            },
-        );
+        if dir.join("PKGBUILD").is_file() {
+            self.apply_validate_tab_icon(None);
+        } else {
+            self.apply_validate_tab_icon(Some(false));
+        }
     }
 
     /// Read `pkgver` from disk for the Version tab title.

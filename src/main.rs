@@ -29,7 +29,7 @@ fn ensure_standard_path_for_subprocesses() {
 
 fn main() -> glib::ExitCode {
     ensure_standard_path_for_subprocesses();
-    let cfg = config::Config::load();
+    let cfg = config::Config::load().unwrap_or_default();
     i18n::init(&cfg);
     let _ = adw::init();
     runtime::init();

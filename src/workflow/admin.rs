@@ -11,6 +11,7 @@
 //! an `git init` + `git remote add` + `fetch` path for manual workflows — this
 //! app does not implement that second path.
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -80,11 +81,17 @@ pub enum UpdateStatus {
     UpToDate { version: String },
     /// Upstream text differs — [`Self::Outdated::diff`] is a unified line diff.
     Outdated {
-        /// Local `pkgver=` value when parseable, else `"?"`.
+        /// Local `epoch:pkgver-pkgrel` value when parseable, else `"?"`.
         local: String,
-        /// Upstream `pkgver=` value when parseable, else `"?"`.
+        /// Upstream `epoch:pkgver-pkgrel` value when parseable, else `"?"`.
         upstream: String,
         /// Unified diff (local → upstream), suitable for a monospace viewer.
+        diff: String,
+    },
+    /// Bytes differ, but upstream is not newer (local is ahead or locally edited).
+    LocallyModified {
+        local: String,
+        upstream: String,
         diff: String,
     },
 }
@@ -545,14 +552,129 @@ fn classify_local_vs_upstream_pkgbuild(local: &str, upstream: &str) -> UpdateSta
     }
     let lf = pkgbuild_edit::parse_quick_fields(&loc);
     let uf = pkgbuild_edit::parse_quick_fields(&up);
-    let local = lf.pkgver.unwrap_or_else(|| "?".into());
-    let upstream = uf.pkgver.unwrap_or_else(|| "?".into());
+    let local = package_release(&lf).unwrap_or_else(|| "?".into());
+    let upstream = package_release(&uf).unwrap_or_else(|| "?".into());
     let diff = pkgbuild_diff::unified_pkbuild_diff_local_vs_upstream(&loc, &up);
-    UpdateStatus::Outdated {
-        local,
-        upstream,
-        diff,
+    if compare_package_releases(&lf, &uf) == Some(Ordering::Less) {
+        UpdateStatus::Outdated {
+            local,
+            upstream,
+            diff,
+        }
+    } else {
+        UpdateStatus::LocallyModified {
+            local,
+            upstream,
+            diff,
+        }
     }
+}
+
+fn package_release(fields: &pkgbuild_edit::PkgbuildQuickFields) -> Option<String> {
+    let pkgver = fields.pkgver.as_deref()?;
+    let pkgrel = fields.pkgrel.as_deref().unwrap_or("1");
+    match fields.epoch.as_deref().filter(|epoch| *epoch != "0") {
+        Some(epoch) => Some(format!("{epoch}:{pkgver}-{pkgrel}")),
+        None => Some(format!("{pkgver}-{pkgrel}")),
+    }
+}
+
+fn compare_package_releases(
+    local: &pkgbuild_edit::PkgbuildQuickFields,
+    upstream: &pkgbuild_edit::PkgbuildQuickFields,
+) -> Option<Ordering> {
+    let local_epoch = local.epoch.as_deref().unwrap_or("0").parse::<u64>().ok()?;
+    let upstream_epoch = upstream
+        .epoch
+        .as_deref()
+        .unwrap_or("0")
+        .parse::<u64>()
+        .ok()?;
+    let epoch_order = local_epoch.cmp(&upstream_epoch);
+    if epoch_order != Ordering::Equal {
+        return Some(epoch_order);
+    }
+    let version_order =
+        compare_version_component(local.pkgver.as_deref()?, upstream.pkgver.as_deref()?);
+    if version_order != Ordering::Equal {
+        return Some(version_order);
+    }
+    Some(compare_version_component(
+        local.pkgrel.as_deref().unwrap_or("1"),
+        upstream.pkgrel.as_deref().unwrap_or("1"),
+    ))
+}
+
+fn compare_version_component(left: &str, right: &str) -> Ordering {
+    let left = version_segments(left);
+    let right = version_segments(right);
+    for index in 0..left.len().max(right.len()) {
+        let a = left.get(index);
+        let b = right.get(index);
+        let order = match (a, b) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(VersionSegment::Tilde), Some(VersionSegment::Tilde)) => Ordering::Equal,
+            (Some(VersionSegment::Tilde), _) => Ordering::Less,
+            (_, Some(VersionSegment::Tilde)) => Ordering::Greater,
+            (Some(VersionSegment::Numeric(a)), Some(VersionSegment::Numeric(b))) => {
+                compare_numeric_segment(a, b)
+            }
+            (Some(VersionSegment::Numeric(_)), Some(VersionSegment::Alpha(_))) => Ordering::Greater,
+            (Some(VersionSegment::Alpha(_)), Some(VersionSegment::Numeric(_))) => Ordering::Less,
+            (Some(VersionSegment::Alpha(a)), Some(VersionSegment::Alpha(b))) => a.cmp(b),
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    Ordering::Equal
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum VersionSegment<'a> {
+    Tilde,
+    Numeric(&'a str),
+    Alpha(&'a str),
+}
+
+fn version_segments(version: &str) -> Vec<VersionSegment<'_>> {
+    let bytes = version.as_bytes();
+    let mut segments = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'~' {
+            segments.push(VersionSegment::Tilde);
+            index += 1;
+            continue;
+        }
+        if !bytes[index].is_ascii_alphanumeric() {
+            index += 1;
+            continue;
+        }
+        let numeric = bytes[index].is_ascii_digit();
+        let start = index;
+        while index < bytes.len()
+            && bytes[index].is_ascii_alphanumeric()
+            && bytes[index].is_ascii_digit() == numeric
+        {
+            index += 1;
+        }
+        let segment = &version[start..index];
+        if numeric {
+            segments.push(VersionSegment::Numeric(segment));
+        } else {
+            segments.push(VersionSegment::Alpha(segment));
+        }
+    }
+    segments
+}
+
+fn compare_numeric_segment(left: &str, right: &str) -> Ordering {
+    let left = left.trim_start_matches('0');
+    let right = right.trim_start_matches('0');
+    left.len().cmp(&right.len()).then_with(|| left.cmp(right))
 }
 
 /// Placeholder. **Intended flow** when implemented:
@@ -566,8 +688,7 @@ pub async fn archive(_pkg_id: &str) -> Result<(), AdminError> {
     Err(AdminError::NotImplemented("Archive / disown package"))
 }
 
-/// Functional helper: open the package's working directory in the user's
-/// file manager via `xdg-open`. Useful for inspecting build artefacts.
+/// Resolve and create the package working directory for a main-thread `GtkFileLauncher`.
 pub async fn open_work_dir(
     work_dir: Option<&Path>,
     pkg: &PackageDef,
@@ -581,19 +702,6 @@ pub async fn open_work_dir(
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|e| AdminError::Other(anyhow::anyhow!("creating {}: {e}", dir.display())))?;
-    }
-    let status = Command::new("xdg-open")
-        .arg(&dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .map_err(|e| AdminError::Other(anyhow::anyhow!("spawning xdg-open: {e}")))?;
-    if !status.success() {
-        return Err(AdminError::Other(anyhow::anyhow!(
-            "xdg-open exited {status}"
-        )));
     }
     Ok(dir)
 }
@@ -625,10 +733,30 @@ mod upstream_classify_tests {
         else {
             panic!("expected Outdated");
         };
-        assert_eq!(local, "1");
-        assert_eq!(upstream, "2");
+        assert_eq!(local, "1-1");
+        assert_eq!(upstream, "2-1");
         assert!(diff.contains("-pkgver=1"));
         assert!(diff.contains("+pkgver=2"));
+    }
+
+    #[test]
+    fn newer_local_version_is_not_labeled_outdated() {
+        let local = "pkgname=x\npkgver=3\npkgrel=1\n";
+        let remote = "pkgname=x\npkgver=2\npkgrel=4\n";
+        assert!(matches!(
+            classify_local_vs_upstream_pkgbuild(local, remote),
+            UpdateStatus::LocallyModified { .. }
+        ));
+    }
+
+    #[test]
+    fn equal_version_with_local_comment_is_locally_modified() {
+        let local = "# local note\npkgname=x\npkgver=2\npkgrel=1\n";
+        let remote = "pkgname=x\npkgver=2\npkgrel=1\n";
+        assert!(matches!(
+            classify_local_vs_upstream_pkgbuild(local, remote),
+            UpdateStatus::LocallyModified { .. }
+        ));
     }
 
     #[test]

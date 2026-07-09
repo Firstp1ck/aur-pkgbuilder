@@ -23,9 +23,8 @@ const SCHEMA_VERSION: u32 = 1;
 const REGISTRY_HEADER: &str = "\
 // aur-pkgbuilder package registry (JSONC — // and /* */ comments are allowed)
 //
-// The GUI owns this file: every save re-writes it, and inline comments
-// inside the JSON object will not survive. Add notes above or below the
-// block; those lines will stay intact.
+// The GUI owns this file: every save re-writes the generated header and JSON
+// object. User-added comments or notes anywhere in the file will not survive.
 //
 // Each entry:
 //   id            AUR pkgbase / repository name (default directory under work_dir)
@@ -54,21 +53,17 @@ fn default_schema_version() -> u32 {
 
 impl Registry {
     /// Load the registry from disk. Prefers `packages.jsonc`; falls back to
-    /// the legacy `packages.json` if present.
-    pub fn load() -> Self {
+    /// the legacy `packages.json` only when the JSONC file is absent.
+    pub fn load() -> Result<Self> {
         let jsonc = registry_path();
-        if jsonc.is_file()
-            && let Ok(r) = config::read_jsonc::<Registry>(&jsonc)
-        {
-            return r;
+        if jsonc.is_file() {
+            return config::read_jsonc_preserving_broken::<Registry>(&jsonc);
         }
         let legacy = config::config_dir().join(LEGACY_REGISTRY_FILE);
-        if legacy.is_file()
-            && let Ok(r) = config::read_jsonc::<Registry>(&legacy)
-        {
-            return r;
+        if legacy.is_file() {
+            return config::read_jsonc_preserving_broken::<Registry>(&legacy);
         }
-        Self::defaults()
+        Ok(Self::defaults())
     }
 
     /// Write the registry to disk with the JSONC header (creating the config
@@ -78,13 +73,13 @@ impl Registry {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
+        config::refuse_to_replace_unparseable::<Registry>(&path)?;
         let body = serde_json::to_string_pretty(self)?;
         let mut out = String::with_capacity(REGISTRY_HEADER.len() + body.len() + 1);
         out.push_str(REGISTRY_HEADER);
         out.push_str(&body);
         out.push('\n');
-        fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;
-        Ok(())
+        config::atomic_write(&path, out.as_bytes())
     }
 
     /// Add or replace a package by `id`. Returns `true` if an existing entry

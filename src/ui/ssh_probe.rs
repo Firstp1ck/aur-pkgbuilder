@@ -3,6 +3,7 @@
 use gtk4::prelude::*;
 use gtk4::{Button, Label, Spinner};
 
+use crate::i18n;
 use crate::runtime;
 use crate::state::AppStateRef;
 use crate::ui::shell::MainShell;
@@ -23,9 +24,9 @@ pub(crate) fn ssh_likely_configured(state: &AppStateRef) -> bool {
     preflight::aur_ssh_probe_is_relevant(key.as_deref())
 }
 
-fn persist_config(state: &AppStateRef) {
+fn persist_config(state: &AppStateRef) -> Result<(), String> {
     let cfg = state.borrow().config.clone();
-    let _ = cfg.save();
+    cfg.save().map_err(|error| error.to_string())
 }
 
 /// What: Runs [`preflight::probe_aur_ssh`] and refreshes the probe row widgets.
@@ -47,9 +48,14 @@ pub(crate) fn run_aur_ssh_probe(
     probe_spinner: &Spinner,
     probe_btn: &Button,
 ) {
-    persist_config(state);
+    if let Err(error) = persist_config(state) {
+        probe_status.set_text(&i18n::t("ssh_probe.save_failed"));
+        probe_status.set_tooltip_text(Some(&error));
+        probe_status.set_css_classes(&["error"]);
+        return;
+    }
     probe_spinner.start();
-    probe_status.set_text("probing…");
+    probe_status.set_text(&i18n::t("ssh_probe.probing"));
     probe_btn.set_sensitive(false);
     let key = state.borrow().config.ssh_key.clone();
     let state2 = state.clone();
@@ -71,25 +77,28 @@ pub(crate) fn run_aur_ssh_probe(
             match result {
                 Ok(SshProbe::Authenticated { banner }) => {
                     state2.borrow_mut().ssh_ok = true;
-                    probe_status.set_text("connected");
+                    probe_status.set_text(&i18n::t("ssh_probe.connected"));
                     probe_status.set_tooltip_text(Some(&banner));
                     probe_status.set_css_classes(&["success"]);
                 }
                 Ok(SshProbe::KeyRejected { banner }) => {
                     state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text("key rejected");
+                    probe_status.set_text(&i18n::t("ssh_probe.key_rejected"));
                     probe_status.set_tooltip_text(Some(&banner));
                     probe_status.set_css_classes(&["error"]);
                 }
                 Ok(SshProbe::Failed { stderr, exit_code }) => {
                     state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text(&format!("failed (exit {exit_code})"));
+                    probe_status.set_text(&i18n::tf(
+                        "ssh_probe.failed_exit",
+                        &[("code", exit_code.to_string().as_str())],
+                    ));
                     probe_status.set_tooltip_text(Some(&stderr));
                     probe_status.set_css_classes(&["error"]);
                 }
                 Err(msg) => {
                     state2.borrow_mut().ssh_ok = false;
-                    probe_status.set_text("error");
+                    probe_status.set_text(&i18n::t("ssh_probe.error"));
                     probe_status.set_tooltip_text(Some(&msg));
                     probe_status.set_css_classes(&["error"]);
                 }

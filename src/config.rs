@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,9 +16,8 @@ const LEGACY_CONFIG_FILE: &str = "config.json";
 const CONFIG_HEADER: &str = "\
 // aur-pkgbuilder configuration (JSONC — // and /* */ comments are allowed)
 //
-// The GUI owns this file: every save re-writes it, and inline comments
-// inside the JSON object will not survive. Add notes above or below the
-// block; those lines will stay intact.
+// The GUI owns this file: every save re-writes the generated header and JSON
+// object. User-added comments or notes anywhere in the file will not survive.
 //
 // Fields:
 //   work_dir               directory where packages are staged and built
@@ -30,9 +30,9 @@ const CONFIG_HEADER: &str = "\
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default)]
+    #[serde(default = "default_work_dir")]
     pub work_dir: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default = "default_ssh_key")]
     pub ssh_key: Option<PathBuf>,
     #[serde(default)]
     pub last_package: Option<String>,
@@ -73,21 +73,17 @@ pub fn render_commit_template(template: &str, pkg_id: &str) -> String {
 
 impl Config {
     /// Load from `<config_dir>/config.jsonc`, falling back to the legacy
-    /// `config.json` if the new file is missing.
-    pub fn load() -> Self {
+    /// `config.json` only when the JSONC file is absent.
+    pub fn load() -> Result<Self> {
         let jsonc = config_path();
-        if jsonc.is_file()
-            && let Ok(cfg) = load_from(&jsonc)
-        {
-            return cfg;
+        if jsonc.is_file() {
+            return read_jsonc_preserving_broken(&jsonc);
         }
         let legacy = config_dir().join(LEGACY_CONFIG_FILE);
-        if legacy.is_file()
-            && let Ok(cfg) = load_from(&legacy)
-        {
-            return cfg;
+        if legacy.is_file() {
+            return read_jsonc_preserving_broken(&legacy);
         }
-        Self::default()
+        Ok(Self::default())
     }
 
     pub fn save(&self) -> Result<()> {
@@ -95,13 +91,13 @@ impl Config {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
+        refuse_to_replace_unparseable::<Config>(&path)?;
         let body = serde_json::to_string_pretty(self)?;
         let mut out = String::with_capacity(CONFIG_HEADER.len() + body.len() + 1);
         out.push_str(CONFIG_HEADER);
         out.push_str(&body);
         out.push('\n');
-        fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;
-        Ok(())
+        atomic_write(&path, out.as_bytes())
     }
 }
 
@@ -113,8 +109,86 @@ pub fn read_jsonc<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     serde_json::from_reader(stripped).with_context(|| format!("parsing {}", path.display()))
 }
 
-fn load_from(path: &Path) -> Result<Config> {
-    read_jsonc(path)
+pub(crate) fn read_jsonc_preserving_broken<T>(path: &Path) -> Result<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    match read_jsonc(path) {
+        Ok(value) => Ok(value),
+        Err(parse_error) => {
+            let backup = preserve_broken_copy(path)?;
+            Err(parse_error.context(format!(
+                "refusing to use invalid file; preserved a copy at {}",
+                backup.display()
+            )))
+        }
+    }
+}
+
+fn preserve_broken_copy(path: &Path) -> Result<PathBuf> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("invalid configuration path {}", path.display()))?;
+    let backup = path.with_file_name(format!("{file_name}.broken-{stamp}"));
+    fs::copy(path, &backup).with_context(|| {
+        format!(
+            "copying invalid configuration {} to {}",
+            path.display(),
+            backup.display()
+        )
+    })?;
+    Ok(backup)
+}
+
+pub(crate) fn refuse_to_replace_unparseable<T>(path: &Path) -> Result<()>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    if path.is_file() {
+        read_jsonc::<T>(path).with_context(|| {
+            format!(
+                "refusing to overwrite unparseable file {}; fix it or move it aside first",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent directory", path.display()))?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = parent.join(format!(
+        ".aur-pkgbuilder.{}.{stamp}.tmp",
+        std::process::id()
+    ));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)
+            .with_context(|| format!("creating {}", tmp.display()))?;
+        file.write_all(bytes)
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        file.sync_all()
+            .with_context(|| format!("syncing {}", tmp.display()))?;
+        drop(file);
+        fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 pub fn config_dir() -> PathBuf {

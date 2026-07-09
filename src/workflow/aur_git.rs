@@ -14,28 +14,28 @@ use super::build::LogLine;
 /// Details:
 /// - Matches common AUR practice; see wiki guidance on keeping the Git tree free of build artefacts.
 /// - Add extra `!filename` lines locally if you track helper scripts or patches in Git.
-pub const DEFAULT_AUR_GITIGNORE: &str = "*\n!.SRCINFO\n!PKGBUILD\n";
+pub const DEFAULT_AUR_GITIGNORE: &str = "\
+# makepkg output and working directories
+*.pkg.tar.*
+*.src.tar.*
+*.log
+*.build
+*.buildinfo
+*.mtree
+src/
+pkg/
+";
 
 /// Upper bound for captured `git` invocations so a stalled network call
 /// (e.g. an unreachable AUR host) cannot hang a workflow forever.
 const GIT_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// What: Builds a `git` [`Command`] whose SSH transport never prompts interactively.
-///
-/// Output:
-/// - `Command` with `GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=10`.
-///
-/// Details:
-/// - Mirrors the direct `ssh` probes in `preflight` / `aur_ssh` so git-over-SSH fails
-///   fast instead of blocking on a passphrase or host-key prompt on a worker thread.
-/// - Harmless for local `file://` remotes (the SSH transport is simply unused).
-fn git_command() -> Command {
-    let mut cmd = Command::new("git");
+/// Apply non-interactive SSH transport settings to a Git command.
+fn harden_git_command(cmd: &mut Command) {
     cmd.env(
         "GIT_SSH_COMMAND",
-        "ssh -o BatchMode=yes -o ConnectTimeout=10",
+        "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes",
     );
-    cmd
 }
 
 /// Display-only rendering of a command line for error messages (never re-executed).
@@ -44,6 +44,15 @@ fn command_display(cmd: &Command) -> String {
     let mut parts = vec![std_cmd.get_program().to_string_lossy().into_owned()];
     parts.extend(std_cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
     parts.join(" ")
+}
+
+async fn git_output(cmd: &mut Command, context: &str) -> Result<std::process::Output> {
+    harden_git_command(cmd);
+    let display = command_display(cmd);
+    tokio::time::timeout(GIT_CAPTURE_TIMEOUT, cmd.output())
+        .await
+        .with_context(|| format!("{context} timed out after 120 seconds: {display}"))?
+        .with_context(|| format!("{context}: spawning {display}"))
 }
 
 /// What: Writes [`DEFAULT_AUR_GITIGNORE`] to `package_dir/.gitignore` when the file is absent.
@@ -86,14 +95,13 @@ pub async fn ensure_clone(
 ) -> Result<PathBuf> {
     let dir = aur_clone_dir(work_dir, pkg_id);
     if dir.join(".git").is_dir() {
+        verify_existing_clone(&dir, ssh_url).await?;
         let _ = events
             .send(LogLine::Info(format!(
-                "AUR clone already present at {}",
+                "Verified existing AUR clone at {} (origin and master branch match)",
                 dir.display()
             )))
             .await;
-        // Do not rename branches here — the checkout may be mid-work. New clones
-        // below run [`ensure_named_master_branch`] immediately after `git clone`.
         return Ok(dir);
     }
     if let Some(parent) = dir.parent() {
@@ -119,7 +127,41 @@ pub async fn ensure_clone(
     )
     .await?;
     ensure_named_master_branch(&dir, events).await?;
+    verify_existing_clone(&dir, ssh_url).await?;
     Ok(dir)
+}
+
+async fn verify_existing_clone(clone_dir: &Path, expected_url: &str) -> Result<()> {
+    let origin = run_capture_stdout(
+        Command::new("git")
+            .arg("remote")
+            .arg("get-url")
+            .arg("origin"),
+        clone_dir,
+    )
+    .await
+    .context("reading existing clone origin URL")?;
+    let origin = origin.trim();
+    if origin != expected_url {
+        anyhow::bail!(
+            "refusing to reuse {}: origin is {origin:?}, expected {expected_url:?}",
+            clone_dir.display()
+        );
+    }
+    let branch = run_capture_stdout(
+        Command::new("git").arg("branch").arg("--show-current"),
+        clone_dir,
+    )
+    .await
+    .context("reading existing clone branch")?;
+    if branch.trim() != "master" {
+        anyhow::bail!(
+            "refusing to reuse {}: current branch is {:?}, expected master",
+            clone_dir.display(),
+            branch.trim()
+        );
+    }
+    Ok(())
 }
 
 /// What: Renames the current branch to `master` so pushes match AUR expectations.
@@ -160,15 +202,14 @@ pub async fn ls_remote_has_any_ref(ssh_url: &str, events: &Sender<LogLine>) -> R
     let _ = events
         .send(LogLine::Info(format!("$ git ls-remote {ssh_url}")))
         .await;
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("ls-remote")
         .arg(ssh_url)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .context("spawning git ls-remote")?;
+        .stderr(Stdio::piped());
+    let output = git_output(&mut command, "git ls-remote").await?;
     if !output.stderr.is_empty() {
         let _ = events
             .send(LogLine::Stderr(
@@ -201,18 +242,17 @@ pub async fn ls_remote_has_any_ref(ssh_url: &str, events: &Sender<LogLine>) -> R
 /// - Uses `git ls-remote` first so empty bare remotes never attempt `git clone` (which would fail).
 /// - Clones with `--branch master` because AUR packages use `master` and bare remotes may not
 ///   advertise `HEAD`, in which case a plain shallow clone can leave an empty work tree.
-/// - Clones into `std::env::temp_dir()` under a unique directory name, then deletes it.
+/// - Clones beneath `<work_dir>/aur/.probe-*`, then best-effort deletes it.
 /// - Uses discrete `Command` arguments; stderr is included when a `git` step fails.
-pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
-    let ls_out = Command::new("git")
+pub async fn remote_tree_has_pkgbuild_in(work_dir: &Path, ssh_url: &str) -> Result<bool> {
+    let mut ls_cmd = Command::new("git");
+    ls_cmd
         .arg("ls-remote")
         .arg(ssh_url)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .context("spawning git ls-remote for remote PKGBUILD probe")?;
+        .stderr(Stdio::piped());
+    let ls_out = git_output(&mut ls_cmd, "remote PKGBUILD probe ls-remote").await?;
 
     if !ls_out.status.success() {
         let err = String::from_utf8_lossy(&ls_out.stderr);
@@ -228,10 +268,11 @@ pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let clone_dest = std::env::temp_dir().join(format!(
-        "aur-pkgbuilder-remote-pkgbuild-probe-{}-{stamp}",
-        std::process::id()
-    ));
+    let probe_parent = work_dir.join("aur");
+    fs::create_dir_all(&probe_parent)
+        .await
+        .with_context(|| format!("creating {}", probe_parent.display()))?;
+    let clone_dest = probe_parent.join(format!(".probe-{}-{stamp}", std::process::id()));
 
     if clone_dest.exists() {
         fs::remove_dir_all(&clone_dest)
@@ -239,7 +280,8 @@ pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
             .with_context(|| format!("clearing stale probe dir {}", clone_dest.display()))?;
     }
 
-    let clone_out = Command::new("git")
+    let mut clone_cmd = Command::new("git");
+    clone_cmd
         .arg("-c")
         .arg("init.defaultBranch=master")
         .arg("clone")
@@ -251,10 +293,8 @@ pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
         .arg(&clone_dest)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .context("spawning git clone for remote PKGBUILD probe")?;
+        .stderr(Stdio::piped());
+    let clone_out = git_output(&mut clone_cmd, "remote PKGBUILD probe clone").await?;
 
     if !clone_out.status.success() {
         let stderr = String::from_utf8_lossy(&clone_out.stderr);
@@ -267,13 +307,14 @@ pub async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
     }
 
     let has = clone_dest.join("PKGBUILD").is_file();
-    if let Err(e) = fs::remove_dir_all(&clone_dest).await {
-        anyhow::bail!(
-            "could not remove temporary probe clone {}: {e}",
-            clone_dest.display()
-        );
-    }
+    let _ = fs::remove_dir_all(&clone_dest).await;
     Ok(has)
+}
+
+#[cfg(test)]
+async fn remote_tree_has_pkgbuild(ssh_url: &str) -> Result<bool> {
+    let probe_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+    remote_tree_has_pkgbuild_in(&probe_root, ssh_url).await
 }
 
 /// What: Returns `true` when `origin/master` resolves to a commit in `clone_dir`.
@@ -523,19 +564,84 @@ async fn merge_base_is_ancestor(
     }
 }
 
-/// Copy `PKGBUILD`, `.SRCINFO`, and `.gitignore` (when present in `build_dir`) into the
-/// AUR clone, overwriting the previous content.
+/// Copy the deliberate maintainer source tree into the AUR clone.
+///
+/// Regular files such as patches, install scripts, units, desktop files, and
+/// helper scripts are included recursively. Generated package/build artefacts
+/// and makepkg working directories are excluded; removed tracked files are
+/// removed from the clone.
 pub async fn stage_files(build_dir: &Path, clone_dir: &Path) -> Result<()> {
-    for name in ["PKGBUILD", ".SRCINFO", ".gitignore"] {
-        let src = build_dir.join(name);
-        if src.is_file() {
-            let dst = clone_dir.join(name);
-            fs::copy(&src, &dst)
-                .await
-                .with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
+    let tracked =
+        run_capture_stdout(Command::new("git").arg("ls-files").arg("-z"), clone_dir).await?;
+    for relative in tracked.split('\0').filter(|name| !name.is_empty()) {
+        let source = build_dir.join(relative);
+        let destination = clone_dir.join(relative);
+        if !source.is_file() && destination.is_file() {
+            fs::remove_file(&destination).await.with_context(|| {
+                format!("removing stale tracked file {}", destination.display())
+            })?;
         }
     }
+
+    for relative in collect_publishable_files(build_dir).await? {
+        let source = build_dir.join(&relative);
+        let destination = clone_dir.join(&relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        fs::copy(&source, &destination).await.with_context(|| {
+            format!("copying {} to {}", source.display(), destination.display())
+        })?;
+    }
     Ok(())
+}
+
+async fn collect_publishable_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut pending_dirs = vec![PathBuf::new()];
+    while let Some(relative_dir) = pending_dirs.pop() {
+        let absolute_dir = root.join(&relative_dir);
+        let mut entries = fs::read_dir(&absolute_dir)
+            .await
+            .with_context(|| format!("reading {}", absolute_dir.display()))?;
+        while let Some(entry) = entries.next_entry().await? {
+            let relative = relative_dir.join(entry.file_name());
+            let file_type = entry.file_type().await?;
+            if file_type.is_dir() {
+                if !is_generated_tree_dir(&relative) {
+                    pending_dirs.push(relative);
+                }
+            } else if file_type.is_file()
+                && !is_build_artifact_name(&entry.file_name().to_string_lossy())
+            {
+                files.push(relative);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn is_generated_tree_dir(relative: &Path) -> bool {
+    if relative.file_name().is_some_and(|name| name == ".git") {
+        return true;
+    }
+    relative.components().count() == 1
+        && relative
+            .file_name()
+            .is_some_and(|name| name == "src" || name == "pkg")
+}
+
+fn is_build_artifact_name(name: &str) -> bool {
+    name.contains(".pkg.tar.")
+        || name.contains(".src.tar.")
+        || name.ends_with(".log")
+        || name.ends_with(".build")
+        || name.ends_with(".buildinfo")
+        || name.ends_with(".mtree")
+        || name.ends_with(".tmp")
 }
 
 /// What: Whether the clone’s working tree differs from `HEAD` (after staging
@@ -548,34 +654,42 @@ pub async fn stage_files(build_dir: &Path, clone_dir: &Path) -> Result<()> {
 /// Details:
 /// - Uses the same comparison as `git diff HEAD` in [`diff`].
 pub async fn has_changes_vs_head(clone_dir: &Path) -> Result<bool> {
-    let status = Command::new("git")
-        .arg("diff")
-        .arg("--quiet")
-        .arg("HEAD")
-        .current_dir(clone_dir)
-        .status()
-        .await
-        .context("spawning git diff --quiet HEAD")?;
-    match status.code() {
-        Some(0) => Ok(false),
-        Some(1) => Ok(true),
-        Some(c) => anyhow::bail!("git diff --quiet HEAD exited with {c}"),
-        None => anyhow::bail!("git diff --quiet HEAD: no exit code"),
-    }
+    let status = run_capture_stdout(
+        Command::new("git")
+            .arg("status")
+            .arg("--porcelain")
+            .arg("--untracked-files=normal"),
+        clone_dir,
+    )
+    .await?;
+    Ok(!status.trim().is_empty())
 }
 
 /// `git diff --stat` + `git diff` of everything in the clone. Used for the
 /// publish preview.
 pub async fn diff(clone_dir: &Path) -> Result<String> {
+    if !head_resolves(clone_dir).await? {
+        let status = run_capture_stdout(
+            Command::new("git")
+                .arg("status")
+                .arg("--short")
+                .arg("--untracked-files=normal"),
+            clone_dir,
+        )
+        .await?;
+        return Ok(if status.trim().is_empty() {
+            "(empty unborn repository)".into()
+        } else {
+            format!("Initial AUR commit (no HEAD yet):\n{status}")
+        });
+    }
+
     let stat = run_capture_stdout(
         Command::new("git").arg("diff").arg("--stat").arg("HEAD"),
         clone_dir,
     )
-    .await
-    .unwrap_or_default();
-    let body = run_capture_stdout(Command::new("git").arg("diff").arg("HEAD"), clone_dir)
-        .await
-        .unwrap_or_default();
+    .await?;
+    let body = run_capture_stdout(Command::new("git").arg("diff").arg("HEAD"), clone_dir).await?;
     let mut out = String::new();
     if !stat.trim().is_empty() {
         out.push_str(&stat);
@@ -583,34 +697,57 @@ pub async fn diff(clone_dir: &Path) -> Result<String> {
     }
     out.push_str(&body);
     if out.trim().is_empty() {
-        out.push_str("(no changes staged against HEAD)");
+        out.push_str("(no changes against HEAD)");
     }
     Ok(out)
 }
 
-/// Stage `PKGBUILD` and `.SRCINFO`, plus `.gitignore` when that file exists in the clone,
-/// then commit with `message` and push to `origin`.
+async fn head_resolves(clone_dir: &Path) -> Result<bool> {
+    let mut cmd = Command::new("git");
+    harden_git_command(&mut cmd);
+    let status = cmd
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg("HEAD")
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .context("spawning git rev-parse --verify HEAD")?;
+    Ok(status.success())
+}
+
+/// Stage the complete deliberate source tree, commit it, and push explicitly to AUR master.
 pub async fn commit_and_push(
     clone_dir: &Path,
     message: &str,
     events: &Sender<LogLine>,
 ) -> Result<()> {
-    let mut add = Command::new("git");
-    add.arg("add").arg("PKGBUILD").arg(".SRCINFO");
-    if clone_dir.join(".gitignore").is_file() {
-        add.arg(".gitignore");
-    }
-    run_capture(&mut add, clone_dir, events).await?;
+    run_capture(Command::new("git").arg("add").arg("-u"), clone_dir, events).await?;
+    stage_publishable_untracked_files(clone_dir, events).await?;
 
-    let status = Command::new("git")
-        .arg("status")
-        .arg("--porcelain")
+    let mut quiet = Command::new("git");
+    harden_git_command(&mut quiet);
+    let status = quiet
+        .arg("diff")
+        .arg("--cached")
+        .arg("--quiet")
         .current_dir(clone_dir)
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
         .await?;
-    if status.stdout.is_empty() {
-        let _ = events.send(LogLine::Info("nothing to commit".into())).await;
-        return Ok(());
+    match status.code() {
+        Some(0) => {
+            let _ = events.send(LogLine::Info("nothing to commit".into())).await;
+            return Ok(());
+        }
+        Some(1) => {}
+        Some(code) => anyhow::bail!("git diff --cached --quiet exited {code}"),
+        None => anyhow::bail!("git diff --cached --quiet returned no exit code"),
     }
 
     run_capture(
@@ -620,7 +757,10 @@ pub async fn commit_and_push(
     )
     .await?;
     run_capture(
-        Command::new("git").arg("push").arg("origin").arg("HEAD"),
+        Command::new("git")
+            .arg("push")
+            .arg("origin")
+            .arg("HEAD:master"),
         clone_dir,
         events,
     )
@@ -628,14 +768,60 @@ pub async fn commit_and_push(
     Ok(())
 }
 
-async fn run_capture(cmd: &mut Command, cwd: &Path, events: &Sender<LogLine>) -> Result<()> {
-    let output = cmd
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+async fn stage_publishable_untracked_files(
+    clone_dir: &Path,
+    events: &Sender<LogLine>,
+) -> Result<()> {
+    for relative in collect_publishable_files(clone_dir).await? {
+        if git_path_is_ignored(clone_dir, &relative).await? {
+            continue;
+        }
+        run_capture(
+            Command::new("git").arg("add").arg("--").arg(&relative),
+            clone_dir,
+            events,
+        )
         .await?;
+    }
+    Ok(())
+}
+
+async fn git_path_is_ignored(clone_dir: &Path, path: &Path) -> Result<bool> {
+    let mut cmd = Command::new("git");
+    harden_git_command(&mut cmd);
+    let status = cmd
+        .arg("check-ignore")
+        .arg("-q")
+        .arg("--")
+        .arg(path)
+        .current_dir(clone_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        Some(code) => anyhow::bail!("git check-ignore exited {code}"),
+        None => anyhow::bail!("git check-ignore returned no exit code"),
+    }
+}
+
+async fn run_capture(cmd: &mut Command, cwd: &Path, events: &Sender<LogLine>) -> Result<()> {
+    harden_git_command(cmd);
+    let display = command_display(cmd);
+    let output = tokio::time::timeout(
+        GIT_CAPTURE_TIMEOUT,
+        cmd.current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await
+    .with_context(|| format!("timed out after 120 seconds: {display}"))?
+    .with_context(|| format!("spawning {display}"))?;
     if !output.stdout.is_empty() {
         let _ = events
             .send(LogLine::Stdout(
@@ -661,13 +847,26 @@ async fn run_capture(cmd: &mut Command, cwd: &Path, events: &Sender<LogLine>) ->
 }
 
 async fn run_capture_stdout(cmd: &mut Command, cwd: &Path) -> Result<String> {
-    let output = cmd
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await?;
+    harden_git_command(cmd);
+    let display = command_display(cmd);
+    let output = tokio::time::timeout(
+        GIT_CAPTURE_TIMEOUT,
+        cmd.current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await
+    .with_context(|| format!("timed out after 120 seconds: {display}"))?
+    .with_context(|| format!("spawning {display}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "{display} exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
@@ -1156,6 +1355,62 @@ package() { true; }
             String::from_utf8_lossy(&head.stdout).trim(),
             String::from_utf8_lossy(&om.stdout).trim()
         );
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn stage_files_copies_nested_sources_and_skips_build_outputs() {
+        let root = workspace_test_dir("aur_git_test_stage_complete_tree");
+        rm_rf_sync(&root);
+        let build = root.join("build");
+        let clone = root.join("clone");
+        std::fs::create_dir_all(build.join("files/systemd")).expect("nested build tree");
+        std::fs::create_dir_all(build.join("src/generated")).expect("generated src tree");
+        std::fs::create_dir_all(&clone).expect("clone dir");
+        git_ok(&clone, &["init"]);
+        std::fs::write(build.join("PKGBUILD"), "pkgname=demo\n").expect("PKGBUILD");
+        std::fs::write(build.join("files/systemd/demo.service"), "[Service]\n").expect("unit");
+        std::fs::write(build.join("demo.pkg.tar.zst"), "artifact").expect("artifact");
+        std::fs::write(build.join("src/generated/source"), "generated").expect("generated");
+
+        stage_files(&build, &clone)
+            .await
+            .expect("stage complete tree");
+
+        assert!(clone.join("PKGBUILD").is_file());
+        assert!(clone.join("files/systemd/demo.service").is_file());
+        assert!(!clone.join("demo.pkg.tar.zst").exists());
+        assert!(!clone.join("src").exists());
+        rm_rf_sync(&root);
+    }
+
+    #[tokio::test]
+    async fn commit_and_push_tracks_helper_files_with_default_gitignore() {
+        let root = workspace_test_dir("aur_git_test_commit_helper_file");
+        rm_rf_sync(&root);
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let (bare, wc) = seed_remote_with_pkgbuild_and_srcinfo(&root);
+        std::fs::write(wc.join(".gitignore"), DEFAULT_AUR_GITIGNORE).expect("gitignore");
+        std::fs::write(wc.join("fix.patch"), "diff --git a/a b/a\n").expect("patch");
+
+        let (tx, rx) = async_channel::unbounded::<LogLine>();
+        let drain = tokio::spawn(async move { while rx.recv().await.is_ok() {} });
+        commit_and_push(&wc, "add helper", &tx)
+            .await
+            .expect("commit helper");
+        drop(tx);
+        let _ = drain.await;
+
+        let output = StdCommand::new("git")
+            .arg("-C")
+            .arg(&bare)
+            .args(["ls-tree", "-r", "--name-only", "master"])
+            .output()
+            .expect("ls-tree");
+        assert!(output.status.success());
+        let names = String::from_utf8_lossy(&output.stdout);
+        assert!(names.lines().any(|name| name == ".gitignore"));
+        assert!(names.lines().any(|name| name == "fix.patch"));
         rm_rf_sync(&root);
     }
 

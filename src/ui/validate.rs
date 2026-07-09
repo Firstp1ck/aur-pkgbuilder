@@ -59,48 +59,6 @@ fn check_row_description(id: CheckId) -> String {
     })
 }
 
-/// Runs bash / `.SRCINFO` / `verifysource` checks in the background. No-op when
-/// the package directory cannot be resolved.
-fn spawn_required_tier_streaming(
-    state: &AppStateRef,
-    rows: &RowMap,
-    log: &LogView,
-    toasts: &ToastOverlay,
-    summary_status: &Label,
-    pkg: &PackageDef,
-    required_header: &Rc<(ExpanderRow, Image)>,
-) {
-    let work = state.borrow().config.work_dir.clone();
-    let pkg = pkg.clone();
-    let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
-        return;
-    };
-    summary_status.set_text(&i18n::t("validate.status.running_required"));
-    mark_tier_running(rows, CheckTier::Required);
-    refresh_required_section_icon(rows, required_header);
-
-    let rows_done = rows.clone();
-    let log_cb = log.clone();
-    let summary_status = summary_status.clone();
-    let toasts = toasts.clone();
-    let hdr = required_header.clone();
-    runtime::spawn_streaming(
-        move |tx| async move { validate::run_tier(CheckTier::Required, &dir, &tx).await },
-        move |line| log_cb.append(&line),
-        move |reports| {
-            for rep in &reports {
-                apply_report(&rows_done, rep, &hdr);
-            }
-            summary_status.set_text(&summarize_i18n(&reports));
-            if reports.iter().any(|r| r.outcome == CheckOutcome::Fail) {
-                toasts.add_toast(Toast::new(&i18n::t("validate.toast_required_fail")));
-            } else {
-                toasts.add_toast(Toast::new(&i18n::t("validate.toast_required_ok")));
-            }
-        },
-    );
-}
-
 pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     let pkg = state.borrow().package().clone();
 
@@ -230,6 +188,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
     btn_row.append(&continue_btn);
     content.append(&btn_row);
 
+    let tier_buttons = Rc::new(vec![
+        run_all_btn.clone(),
+        optional_run_btn.clone(),
+        run_extended_btn.clone(),
+        extended_section_run_btn.clone(),
+    ]);
+
     // --- Run all (fast tiers) ---
     {
         let state = state.clone();
@@ -239,6 +204,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let summary_status = summary_status.clone();
         let pkg = pkg.clone();
         let required_hdr = required_section_hdr.clone();
+        let tier_buttons = tier_buttons.clone();
         run_all_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
@@ -250,16 +216,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             mark_tier_running(&rows, CheckTier::Required);
             mark_tier_running(&rows, CheckTier::Optional);
             refresh_required_section_icon(&rows, &required_hdr);
+            set_buttons_sensitive(&tier_buttons, false);
 
             let rows_done = rows.clone();
             let log_cb = log.clone();
             let summary_status = summary_status.clone();
             let toasts = toasts.clone();
             let hdr = required_hdr.clone();
+            let tier_buttons_done = tier_buttons.clone();
             runtime::spawn_streaming(
                 move |tx| async move { validate::run_all(&dir, &tx).await },
                 move |line| log_cb.append(&line),
                 move |reports| {
+                    set_buttons_sensitive(&tier_buttons_done, true);
                     for rep in &reports {
                         apply_report(&rows_done, rep, &hdr);
                     }
@@ -283,7 +252,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let summary_status = summary_status.clone();
         let pkg = pkg.clone();
         let required_hdr = required_section_hdr.clone();
-        let optional_run_inner = optional_run_btn.clone();
+        let tier_buttons = tier_buttons.clone();
         optional_run_btn.connect_clicked(move |_| {
             let work = state.borrow().config.work_dir.clone();
             let Some(dir) = sync::package_dir(work.as_deref(), &pkg) else {
@@ -293,19 +262,19 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             log.clear();
             summary_status.set_text(&i18n::t("validate.status.running_optional"));
             mark_tier_running(&rows, CheckTier::Optional);
-            optional_run_inner.set_sensitive(false);
+            set_buttons_sensitive(&tier_buttons, false);
 
             let rows_done = rows.clone();
             let log_cb = log.clone();
             let summary_status = summary_status.clone();
             let toasts = toasts.clone();
-            let optional_run_done = optional_run_inner.clone();
+            let tier_buttons_done = tier_buttons.clone();
             let hdr = required_hdr.clone();
             runtime::spawn_streaming(
                 move |tx| async move { validate::run_tier(CheckTier::Optional, &dir, &tx).await },
                 move |line| log_cb.append(&line),
                 move |reports| {
-                    optional_run_done.set_sensitive(true);
+                    set_buttons_sensitive(&tier_buttons_done, true);
                     for rep in &reports {
                         apply_report(&rows_done, rep, &hdr);
                     }
@@ -320,16 +289,6 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         });
     }
 
-    spawn_required_tier_streaming(
-        state,
-        &rows,
-        &log,
-        &toasts,
-        &summary_status,
-        &pkg,
-        &required_section_hdr,
-    );
-
     // --- Run extended (fakeroot build + package lint) — toolbar + section header ---
     {
         let state_top = state.clone();
@@ -339,8 +298,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let summary_top = summary_status.clone();
         let pkg_top = pkg.clone();
         let required_top = required_section_hdr.clone();
-        let run_ext_top = run_extended_btn.clone();
-        let run_sec_top = extended_section_run_btn.clone();
+        let tier_buttons_top = tier_buttons.clone();
         run_extended_btn.connect_clicked(move |_| {
             spawn_extended_validation_run(
                 ExtendedValidationRunCtx {
@@ -352,7 +310,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     pkg: pkg_top.clone(),
                     required_hdr: required_top.clone(),
                 },
-                &[run_ext_top.clone(), run_sec_top.clone()],
+                tier_buttons_top.as_slice(),
             );
         });
         let state_sec = state.clone();
@@ -362,8 +320,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let summary_sec = summary_status.clone();
         let pkg_sec = pkg.clone();
         let required_sec = required_section_hdr.clone();
-        let run_ext_btn = run_extended_btn.clone();
-        let run_sec_btn = extended_section_run_btn.clone();
+        let tier_buttons_sec = tier_buttons.clone();
         extended_section_run_btn.connect_clicked(move |_| {
             spawn_extended_validation_run(
                 ExtendedValidationRunCtx {
@@ -375,7 +332,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     pkg: pkg_sec.clone(),
                     required_hdr: required_sec.clone(),
                 },
-                &[run_ext_btn.clone(), run_sec_btn.clone()],
+                tier_buttons_sec.as_slice(),
             );
         });
     }
@@ -406,6 +363,12 @@ struct ExtendedValidationRunCtx {
 }
 
 /// Starts the extended-tier validation stream and disables `busy_buttons` until completion.
+fn set_buttons_sensitive(buttons: &[Button], sensitive: bool) {
+    for button in buttons {
+        button.set_sensitive(sensitive);
+    }
+}
+
 fn spawn_extended_validation_run(ctx: ExtendedValidationRunCtx, busy_buttons: &[Button]) {
     let work = ctx.state.borrow().config.work_dir.clone();
     let Some(dir) = sync::package_dir(work.as_deref(), &ctx.pkg) else {
@@ -504,9 +467,21 @@ fn render_check_row(
             let log_cb = log.clone();
             let hdr_report = hdr.clone();
             runtime::spawn_streaming(
-                move |tx| async move { validate::run_check(id, &dir, &tx).await },
+                move |tx| async move {
+                    Ok::<CheckReport, String>(validate::run_check(id, &dir, &tx).await)
+                },
                 move |line| log_cb.append(&line),
-                move |report| apply_report(&rows_done, &report, &hdr_report),
+                move |result| match result {
+                    Ok(report) => apply_report(&rows_done, &report, &hdr_report),
+                    Err(error) => {
+                        let report = CheckReport {
+                            id,
+                            outcome: CheckOutcome::Fail,
+                            summary: error,
+                        };
+                        apply_report(&rows_done, &report, &hdr_report);
+                    }
+                },
             );
         });
     }

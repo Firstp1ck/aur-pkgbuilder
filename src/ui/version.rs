@@ -47,7 +47,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         &stale_banner,
         None,
     ));
-    content.append(&checksum_group(state, &pkg, &toasts));
+    content.append(&checksum_group(shell, state, &pkg, &toasts));
 
     let continue_btn = Button::builder()
         .label(i18n::t("version.continue_validate"))
@@ -93,7 +93,12 @@ fn kind_hint(pkg: &PackageDef) -> ListBox {
 
 /// Generic "refresh sha256sums" runner — useful for every kind of package,
 /// so it is shown unconditionally.
-fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) -> ListBox {
+fn checksum_group(
+    shell: &MainShell,
+    state: &AppStateRef,
+    pkg: &PackageDef,
+    toasts: &ToastOverlay,
+) -> ListBox {
     let row = ActionRow::builder()
         .title(i18n::t("version.checksum_row_title"))
         .subtitle(i18n::t("version.checksum_row_sub"))
@@ -118,6 +123,7 @@ fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) 
 
     let toasts = toasts.clone();
     let state = state.clone();
+    let shell = shell.clone();
     let spinner_c = spinner.clone();
     let run_btn_c = run_btn.clone();
     let pkg = pkg.clone();
@@ -133,6 +139,8 @@ fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) 
         let spinner_done = spinner_c.clone();
         let run_btn_done = run_btn_c.clone();
         let toasts = toasts.clone();
+        let shell = shell.clone();
+        let state = state.clone();
         runtime::spawn_streaming(
             move |tx| async move {
                 build_wf::run_updpkgsums(&dir, &tx)
@@ -149,6 +157,7 @@ fn checksum_group(state: &AppStateRef, pkg: &PackageDef, toasts: &ToastOverlay) 
                 match res {
                     Ok(report) if report.status.success() && report.pkgbuild_changed => {
                         toasts.add_toast(Toast::new(&i18n::t("version.toast_checksums_updated")));
+                        shell.refresh_version_tab_page(&state);
                     }
                     Ok(report) if report.status.success() => {
                         toasts.add_toast(Toast::new(&i18n::t("version.toast_checksums_unchanged")));

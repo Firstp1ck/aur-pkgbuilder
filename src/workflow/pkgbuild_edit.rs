@@ -30,6 +30,7 @@ pub enum PkgbuildEditError {
 pub struct PkgbuildQuickFields {
     pub maintainer_comment: Option<String>,
     pub pkgname: Option<String>,
+    pub epoch: Option<String>,
     pub pkgver: Option<String>,
     pub pkgrel: Option<String>,
     pub pkgdesc: Option<String>,
@@ -230,6 +231,7 @@ fn apply_parsed_assignment(out: &mut PkgbuildQuickFields, key: &str, full_rhs: &
     let inner = strip_outer_quotes(full_rhs.trim());
     match key {
         "pkgname" => out.pkgname = Some(inner.to_string()),
+        "epoch" => out.epoch = Some(inner.to_string()),
         "pkgver" => out.pkgver = Some(inner.to_string()),
         "pkgrel" => out.pkgrel = Some(inner.to_string()),
         "pkgdesc" => out.pkgdesc = Some(inner.to_string()),
@@ -311,8 +313,10 @@ fn parse_simple_assignment(line: &str) -> Option<(&str, &str)> {
 }
 
 fn strip_outer_quotes(s: &str) -> &str {
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        s[1..s.len().saturating_sub(1)].trim()
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
+        s[1..s.len() - 1].trim()
     } else {
         s
     }

@@ -413,6 +413,19 @@ fn home_section_header_row(title: &str) -> ListBoxRow {
 ///
 /// Details:
 /// - Persists via [`crate::workflow::registry::Registry::save`]; refreshes the Home list afterward.
+fn toast_home_persistence_error(list: &ListBox, error: &dyn std::fmt::Display) {
+    let Some(overlay) = list
+        .ancestor(ToastOverlay::static_type())
+        .and_downcast::<ToastOverlay>()
+    else {
+        return;
+    };
+    overlay.add_toast(Toast::new(&i18n::tf(
+        "manage.failed",
+        &[("e", error.to_string().as_str())],
+    )));
+}
+
 fn wire_home_package_favorite_menu(
     row: &ActionRow,
     shell: &MainShell,
@@ -440,6 +453,14 @@ fn wire_home_package_favorite_menu(
     vbox.append(&action_btn);
     popover.set_child(Some(&vbox));
     popover.set_parent(row);
+    {
+        let popover = popover.clone();
+        row.connect_unrealize(move |_| {
+            if popover.parent().is_some() {
+                popover.unparent();
+            }
+        });
+    }
 
     let pkg_id_press = pkg_id.to_string();
     let state_press = state.clone();
@@ -472,7 +493,7 @@ fn wire_home_package_favorite_menu(
     let controls_click = controls_rc.clone();
     let popover_click = popover.clone();
     action_btn.connect_clicked(move |_| {
-        {
+        let save_error = {
             let mut st = state_click.borrow_mut();
             if let Some(p) = st
                 .registry
@@ -481,8 +502,13 @@ fn wire_home_package_favorite_menu(
                 .find(|p| p.id == pkg_id_click)
             {
                 p.favorite = !p.favorite;
-                let _ = st.registry.save();
+                st.registry.save().err()
+            } else {
+                None
             }
+        };
+        if let Some(error) = save_error {
+            toast_home_persistence_error(&list_click, &error);
         }
         popover_click.popdown();
         refresh_package_list(&list_click, &shell_click, &state_click, &controls_click);
@@ -669,10 +695,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     let replaced = {
                         let mut st = state.borrow_mut();
                         let replaced = st.registry.upsert(pkg);
-                        let _ = st.registry.save();
+                        if let Err(error) = st.registry.save() {
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "manage.failed",
+                                &[("e", error.to_string().as_str())],
+                            )));
+                            return;
+                        }
                         replaced
                     };
                     shell.refresh_tabs_for_package(&state);
+                    shell.refresh_manage_tab_page(&state);
                     refresh_package_list(&list, &shell, &state, &list_controls);
                     let toast_msg = if replaced {
                         i18n::tf("home.toast_pkg_updated", &[("id", &id)])
@@ -935,10 +968,13 @@ fn render_package_row(
         let pkg = pkg.clone();
         let shell = shell.clone();
         let state = state.clone();
+        let list = list.clone();
         row.connect_activated(move |_| {
             state.borrow_mut().package = Some(pkg.clone());
             state.borrow_mut().config.last_package = Some(pkg.id.clone());
-            let _ = state.borrow().config.save();
+            if let Err(error) = state.borrow().config.save() {
+                toast_home_persistence_error(&list, &error);
+            }
             shell.refresh_tabs_for_package(&state);
             shell.goto_tab(&state, ProcessTab::Connection);
         });
@@ -966,9 +1002,12 @@ fn render_package_row(
                     {
                         let mut st = state_inner.borrow_mut();
                         st.registry.upsert(updated);
-                        let _ = st.registry.save();
+                        if let Err(error) = st.registry.save() {
+                            toast_home_persistence_error(&list_inner, &error);
+                        }
                     }
                     shell_inner.refresh_tabs_for_package(&state_inner);
+                    shell_inner.refresh_manage_tab_page(&state_inner);
                     refresh_package_list(&list_inner, &shell_inner, &state_inner, &controls_inner);
                 },
             );
@@ -981,14 +1020,65 @@ fn render_package_row(
         let list = list.clone();
         let shell = shell.clone();
         let controls_rc = controls_rc.clone();
-        remove_btn.connect_clicked(move |_| {
-            {
-                let mut st = state.borrow_mut();
-                st.registry.remove(&id);
-                let _ = st.registry.save();
-            }
-            shell.refresh_tabs_for_package(&state);
-            refresh_package_list(&list, &shell, &state, &controls_rc);
+        remove_btn.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().and_downcast::<Window>() else {
+                return;
+            };
+            let title = i18n::t("home.dialog_remove_mismatch_title");
+            let body = i18n::tf(
+                "home.dialog_remove_mismatch_body",
+                &[("packages", id.as_str())],
+            );
+            let dialog = AlertDialog::new(Some(&title), Some(&body));
+            let cancel = i18n::t("home.dialog_response_cancel");
+            let remove = i18n::t("home.dialog_response_remove");
+            dialog.add_responses(&[("cancel", &cancel), ("remove", &remove)]);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+            let parent_for_callback = parent.clone();
+            let id = id.clone();
+            let state = state.clone();
+            let list = list.clone();
+            let shell = shell.clone();
+            let controls_rc = controls_rc.clone();
+            dialog.choose(
+                Some(&parent),
+                Option::<&gtk4::gio::Cancellable>::None,
+                move |response| {
+                    if response.as_str() != "remove" {
+                        return;
+                    }
+                    let save_error = {
+                        let mut st = state.borrow_mut();
+                        st.registry.remove(&id);
+                        if st.package.as_ref().is_some_and(|pkg| pkg.id == id) {
+                            st.package = None;
+                        }
+                        if st.config.last_package.as_deref() == Some(id.as_str()) {
+                            st.config.last_package = None;
+                        }
+                        st.prune_aur_account_mismatch_ids();
+                        st.registry
+                            .save()
+                            .and_then(|()| st.config.save())
+                            .err()
+                            .map(|error| error.to_string())
+                    };
+                    shell.refresh_tabs_for_package(&state);
+                    shell.refresh_manage_tab_page(&state);
+                    refresh_package_list(&list, &shell, &state, &controls_rc);
+                    if let Some(error) = save_error {
+                        let error_dialog =
+                            AlertDialog::new(Some("Could not save package removal"), Some(&error));
+                        error_dialog.add_responses(&[("ok", "_OK")]);
+                        error_dialog.choose(
+                            Some(&parent_for_callback),
+                            Option::<&gtk4::gio::Cancellable>::None,
+                            |_| {},
+                        );
+                    }
+                },
+            );
         });
     }
 
@@ -1103,10 +1193,21 @@ fn perform_remove_mismatched_packages(
         {
             st.config.last_package = None;
         }
-        let _ = st.registry.save();
-        let _ = st.config.save();
+        if let Err(error) = st.registry.save() {
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "manage.failed",
+                &[("e", error.to_string().as_str())],
+            )));
+        }
+        if let Err(error) = st.config.save() {
+            toasts.add_toast(Toast::new(&i18n::tf(
+                "manage.failed",
+                &[("e", error.to_string().as_str())],
+            )));
+        }
     }
     shell.refresh_tabs_for_package(state);
+    shell.refresh_manage_tab_page(state);
     refresh_package_list(list, shell, state, controls_rc);
     toasts.add_toast(Toast::new(&i18n::tf(
         "home.toast_removed_n",

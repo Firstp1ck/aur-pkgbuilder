@@ -248,10 +248,13 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 toasts.add_toast(Toast::new(&i18n::t("publish.toast_could_not_resolve_dir")));
                 return;
             };
+            state.borrow_mut().publish_operation_active = true;
             spinner.start();
             stage_btn_inner.set_sensitive(false);
+            push_btn.set_sensitive(false);
             log.clear();
 
+            let state_done = state.clone();
             let spinner_done = spinner.clone();
             let stage_btn_done = stage_btn_inner.clone();
             let push_btn = push_btn.clone();
@@ -279,12 +282,14 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 },
                 move |line| log_cb.append(&line),
                 move |res| {
+                    state_done.borrow_mut().publish_operation_active = false;
                     spinner_done.stop();
-                    stage_btn_done.set_sensitive(true);
+                    let ssh_ready = state_done.borrow().ssh_ok;
+                    stage_btn_done.set_sensitive(ssh_ready);
                     match res {
                         Ok((diff, has_changes)) => {
                             diff_buffer.set_text(&diff);
-                            push_btn.set_sensitive(has_changes);
+                            push_btn.set_sensitive(ssh_ready && has_changes);
                             if has_changes {
                                 toasts.add_toast(Toast::new(&i18n::t("publish.toast_push_ready")));
                             } else {
@@ -306,6 +311,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
         let state = state.clone();
         let spinner = spinner.clone();
         let push_btn_inner = push_btn.clone();
+        let stage_btn_inner = stage_btn.clone();
         let log = log.clone();
         let message_row = message_row.clone();
         let toasts = toasts.clone();
@@ -320,11 +326,15 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 toasts.add_toast(Toast::new(&i18n::t("publish.toast_no_message")));
                 return;
             }
+            state.borrow_mut().publish_operation_active = true;
             spinner.start();
             push_btn_inner.set_sensitive(false);
+            stage_btn_inner.set_sensitive(false);
 
+            let state_done = state.clone();
             let spinner_done = spinner.clone();
             let push_btn_done = push_btn_inner.clone();
+            let stage_btn_done = stage_btn_inner.clone();
             let log_cb = log.clone();
             let toasts = toasts.clone();
             let id = id.clone();
@@ -337,14 +347,17 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                 },
                 move |line| log_cb.append(&line),
                 move |res| {
+                    state_done.borrow_mut().publish_operation_active = false;
                     spinner_done.stop();
+                    let ssh_ready = state_done.borrow().ssh_ok;
+                    stage_btn_done.set_sensitive(ssh_ready);
                     match res {
                         Ok(()) => {
                             push_btn_done.set_sensitive(false);
                             toasts.add_toast(Toast::new(&i18n::t("publish.toast_pushed")));
                         }
                         Err(e) => {
-                            push_btn_done.set_sensitive(true);
+                            push_btn_done.set_sensitive(ssh_ready);
                             toasts.add_toast(Toast::new(&i18n::tf(
                                 "publish.toast_push_failed",
                                 &[("e", &e)],

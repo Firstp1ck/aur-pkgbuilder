@@ -107,11 +107,13 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListB
         .title(i18n::t("ssh_setup.one_click_row_title"))
         .subtitle(i18n::t("ssh_setup.one_click_row_sub"))
         .build();
+    let spinner = Spinner::new();
     let btn = Button::builder()
         .label(i18n::t("ssh_setup.btn_run_setup"))
         .valign(Align::Center)
         .css_classes(vec!["pill", "suggested-action"])
         .build();
+    row.add_suffix(&spinner);
     row.add_suffix(&btn);
 
     let state = state.clone();
@@ -119,15 +121,18 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListB
     let keys_list = keys_list.clone();
     btn.connect_clicked(move |btn| {
         btn.set_sensitive(false);
+        spinner.start();
         let comment = whoami_comment();
         let state_cb = state.clone();
         let toasts_cb = toasts.clone();
         let keys_list_cb = keys_list.clone();
         let btn_cb = btn.clone();
+        let spinner_cb = spinner.clone();
         runtime::spawn(
             async move { ssh_setup::full_setup(&comment).await },
             move |res| {
                 btn_cb.set_sensitive(true);
+                spinner_cb.stop();
                 match res {
                     Ok(report) => {
                         apply_full_setup(&state_cb, &toasts_cb, &keys_list_cb, report);
@@ -151,6 +156,15 @@ fn one_click_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListB
     )
 }
 
+fn persist_ssh_config(state: &AppStateRef, toasts: &ToastOverlay) {
+    if let Err(error) = state.borrow().config.save() {
+        toasts.add_toast(Toast::new(&i18n::tf(
+            "ssh_setup.toast_verified_save_config_fail",
+            &[("e", error.to_string().as_str())],
+        )));
+    }
+}
+
 fn apply_full_setup(
     state: &AppStateRef,
     toasts: &ToastOverlay,
@@ -158,7 +172,7 @@ fn apply_full_setup(
     report: FullSetupReport,
 ) {
     state.borrow_mut().config.ssh_key = Some(report.key.private_path.clone());
-    let _ = state.borrow().config.save();
+    persist_ssh_config(state, toasts);
     refresh_keys_group(keys_list, state, toasts);
 
     let mut lines: Vec<String> = Vec::with_capacity(3);
@@ -172,19 +186,20 @@ fn apply_full_setup(
         ConfigState::Updated => i18n::t("ssh_setup.setup_line_config_updated"),
         ConfigState::Unchanged => i18n::t("ssh_setup.setup_line_config_ok"),
     });
-    lines.push(match report.known_hosts {
-        KnownHostsState::AlreadyPresent => i18n::t("ssh_setup.setup_line_hosts_ok"),
+    match report.known_hosts {
+        KnownHostsState::AlreadyPresent => lines.push(i18n::t("ssh_setup.setup_line_hosts_ok")),
+        KnownHostsState::Added { fingerprints } if fingerprints.is_empty() => {
+            lines.push(i18n::t("ssh_setup.setup_line_hosts_added_plain"));
+        }
         KnownHostsState::Added { fingerprints } => {
-            if fingerprints.is_empty() {
-                i18n::t("ssh_setup.setup_line_hosts_added_plain")
-            } else {
-                i18n::tf(
+            for fingerprint in fingerprints {
+                lines.push(i18n::tf(
                     "ssh_setup.setup_line_hosts_added_fp",
-                    &[("fp", fingerprints.first().map(String::as_str).unwrap_or(""))],
-                )
+                    &[("fp", fingerprint.as_str())],
+                ));
             }
         }
-    });
+    }
     for line in lines {
         toasts.add_toast(Toast::new(&line));
     }
@@ -276,7 +291,7 @@ fn render_key_row(
     let toasts = toasts.clone();
     use_btn.connect_clicked(move |_btn| {
         state.borrow_mut().config.ssh_key = Some(path.clone());
-        let _ = state.borrow().config.save();
+        persist_ssh_config(&state, &toasts);
         refresh_keys_group(&keys_list, &state, &toasts);
         toasts.add_toast(Toast::new(&i18n::t("ssh_setup.toast_key_selected")));
     });
@@ -567,7 +582,7 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
                     Ok((key, KeyState::Generated)) => {
                         let path = key.private_path.display().to_string();
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
-                        let _ = state_cb.borrow().config.save();
+                        persist_ssh_config(&state_cb, &toasts_cb);
                         refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
                         stamp_ssh_op_row(
                             &ensure_feedback_cb,
@@ -580,7 +595,7 @@ fn key_group(state: &AppStateRef, toasts: &ToastOverlay, keys_list: &ListBox) ->
                     Ok((key, KeyState::Reused)) => {
                         let path = key.private_path.display().to_string();
                         state_cb.borrow_mut().config.ssh_key = Some(key.private_path.clone());
-                        let _ = state_cb.borrow().config.save();
+                        persist_ssh_config(&state_cb, &toasts_cb);
                         refresh_keys_group(&keys_list_cb, &state_cb, &toasts_cb);
                         stamp_ssh_op_row(
                             &ensure_feedback_cb,

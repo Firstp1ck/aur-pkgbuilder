@@ -4,7 +4,7 @@
 //! (e.g. auxiliary sources, post-build hooks) only touches this file and
 //! the model in [`crate::workflow::package`].
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -546,9 +546,21 @@ pub fn open(
         });
     }
 
+    let cancelled = Rc::new(Cell::new(false));
     {
         let window = window.clone();
-        cancel.connect_clicked(move |_| window.close());
+        let cancelled = cancelled.clone();
+        cancel.connect_clicked(move |_| {
+            cancelled.set(true);
+            window.close();
+        });
+    }
+    {
+        let cancelled = cancelled.clone();
+        window.connect_close_request(move |_| {
+            cancelled.set(true);
+            gtk4::glib::Propagation::Proceed
+        });
     }
 
     {
@@ -567,6 +579,7 @@ pub fn open(
         let save_primary = save.clone();
         let save_busy = save.clone();
         let once: SaveCallback = Rc::new(RefCell::new(Some(Box::new(on_save))));
+        let cancelled_save = cancelled.clone();
         let purpose_save = purpose;
         save_primary.connect_clicked(move |btn| {
             btn.remove_css_class("error");
@@ -649,9 +662,13 @@ pub fn open(
             let once_c = once.clone();
             let pkg_ready = pkg;
             let purpose_probe = purpose_save;
+            let cancelled_probe = cancelled_save.clone();
             runtime::spawn(
                 async move { pkgbase::check_pkgbase_publish_namespace(&id_for_probe).await },
                 move |res| {
+                    if cancelled_probe.get() {
+                        return;
+                    }
                     save_c.set_sensitive(true);
                     match res {
                         Err(e) => {

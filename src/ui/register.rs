@@ -152,6 +152,7 @@ fn register_schedule_remote_pkgbuild_probe(
 
     let url = pkg.aur_ssh_url();
     let pkg_id = pkg.id.clone();
+    let work_dir = state.borrow().config.work_dir.clone();
     let state = state.clone();
     let pkg_cell = Rc::clone(pkg_cell);
     let probe = probe.clone();
@@ -159,7 +160,11 @@ fn register_schedule_remote_pkgbuild_probe(
     let edit_btn = edit_btn.clone();
     let toasts = toasts.clone();
     runtime::spawn(
-        async move { aur_git::remote_tree_has_pkgbuild(&url).await },
+        async move {
+            let work_dir =
+                work_dir.ok_or_else(|| anyhow::anyhow!("working directory is not set"))?;
+            aur_git::remote_tree_has_pkgbuild_in(&work_dir, &url).await
+        },
         move |res| {
             if pkg_cell.borrow().as_ref().map(|p| p.id.as_str()) != Some(pkg_id.as_str()) {
                 return;
@@ -397,6 +402,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
 
     {
         let state = state.clone();
+        let shell = shell.clone();
         let summary = summary.clone();
         let pkg_cell = Rc::clone(&pkg_cell);
         let prepared_ok = Rc::clone(&prepared_ok);
@@ -416,6 +422,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let prepare_btn = prepare_btn.clone();
             let toasts = toasts.clone();
             let state_cb = state.clone();
+            let shell_cb = shell.clone();
             let ssh_ready_cb = state.borrow().ssh_ok;
             let starter_btn = starter_btn.clone();
             let edit_pkgbuild_btn = edit_pkgbuild_btn.clone();
@@ -429,9 +436,16 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                     let id = pkg.id.clone();
                     {
                         let mut st = state_cb.borrow_mut();
-                        let _ = st.registry.upsert(pkg.clone());
-                        let _ = st.registry.save();
+                        st.registry.upsert(pkg.clone());
+                        if let Err(error) = st.registry.save() {
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "manage.failed",
+                                &[("e", error.to_string().as_str())],
+                            )));
+                            return;
+                        }
                     }
+                    shell_cb.refresh_manage_tab_page(&state_cb);
                     *pkg_cell.borrow_mut() = Some(pkg.clone());
                     *prepared_ok.borrow_mut() = false;
                     push_btn.set_sensitive(false);
@@ -502,6 +516,7 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
             let starter_btn_spawn = starter_btn_for_cb.clone();
             let edit_btn_spawn = edit_pkgbuild_starter_cb.clone();
             let shell_spawn = shell.clone();
+            btn.set_sensitive(false);
             runtime::spawn(
                 async move {
                     let starter =
@@ -515,45 +530,49 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                         })?;
                     Ok::<StarterPkgbuildOutcome, pkgbuild_edit::PkgbuildEditError>(starter)
                 },
-                move |res| match res {
-                    Ok(StarterPkgbuildOutcome::Created) => {
-                        *prepared_ok.borrow_mut() = false;
-                        push_btn.set_sensitive(false);
-                        toasts.add_toast(Toast::new(&i18n::tf(
-                            "register.toast_starter_wrote",
-                            &[("id", id_toast.as_str())],
-                        )));
-                        sync_register_pkgbuild_actions(
-                            &starter_btn_spawn,
-                            &edit_btn_spawn,
-                            &state_spawn,
-                            &pkg_cell_spawn,
-                            ssh_ready_spawn,
-                            &probe_spawn,
-                        );
-                        if let (Some(parent), Some(pkg_open)) =
-                            (parent_win, pkg_cell_spawn.borrow().clone())
-                        {
-                            open_register_pkgbuild_editor(
-                                &parent,
-                                &shell_spawn,
+                move |res| {
+                    starter_btn_spawn.set_sensitive(true);
+                    match res {
+                        Ok(StarterPkgbuildOutcome::Created) => {
+                            *prepared_ok.borrow_mut() = false;
+                            push_btn.set_sensitive(false);
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "register.toast_starter_wrote",
+                                &[("id", id_toast.as_str())],
+                            )));
+                            sync_register_pkgbuild_actions(
+                                &starter_btn_spawn,
+                                &edit_btn_spawn,
                                 &state_spawn,
-                                pkg_open,
-                                Rc::clone(&prepared_ok),
-                                &push_btn,
-                                true,
+                                &pkg_cell_spawn,
+                                ssh_ready_spawn,
+                                &probe_spawn,
                             );
+                            if let (Some(parent), Some(pkg_open)) =
+                                (parent_win, pkg_cell_spawn.borrow().clone())
+                            {
+                                open_register_pkgbuild_editor(
+                                    &parent,
+                                    &shell_spawn,
+                                    &state_spawn,
+                                    pkg_open,
+                                    Rc::clone(&prepared_ok),
+                                    &push_btn,
+                                    true,
+                                );
+                            }
                         }
-                    }
-                    Ok(StarterPkgbuildOutcome::SkippedExisting) => {
-                        toasts.add_toast(Toast::new(&i18n::t("register.toast_starter_skipped")));
-                    }
-                    Err(e) => {
-                        let err = e.to_string();
-                        toasts.add_toast(Toast::new(&i18n::tf(
-                            "register.toast_starter_fail",
-                            &[("err", err.as_str())],
-                        )));
+                        Ok(StarterPkgbuildOutcome::SkippedExisting) => {
+                            toasts
+                                .add_toast(Toast::new(&i18n::t("register.toast_starter_skipped")));
+                        }
+                        Err(e) => {
+                            let err = e.to_string();
+                            toasts.add_toast(Toast::new(&i18n::tf(
+                                "register.toast_starter_fail",
+                                &[("err", err.as_str())],
+                            )));
+                        }
                     }
                 },
             );
@@ -773,7 +792,12 @@ pub fn build(shell: &MainShell, state: &AppStateRef) -> NavigationPage {
                                         let mut st = state_ok.borrow_mut();
                                         st.package = Some(pkg_ok.clone());
                                         st.config.last_package = Some(pkg_ok.id.clone());
-                                        let _ = st.config.save();
+                                        if let Err(error) = st.config.save() {
+                                            toasts.add_toast(Toast::new(&i18n::tf(
+                                                "manage.failed",
+                                                &[("e", error.to_string().as_str())],
+                                            )));
+                                        }
                                     }
                                     shell_ok.refresh_tabs_for_package(&state_ok);
                                     shell_ok.refresh_home_list(&state_ok);
